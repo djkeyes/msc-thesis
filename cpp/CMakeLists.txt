@@ -1,0 +1,75 @@
+SET(PROJECT_NAME MSC_THESIS)
+
+PROJECT(${PROJECT_NAME})
+CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
+
+set(BUILD_TYPE Release)
+
+set(EXECUTABLE_OUTPUT_PATH bin)
+set(LIBRARY_OUTPUT_PATH lib)
+set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+
+
+# uncomment the following line and comment line afterward if you want to pick up the environmental variable instead of hardcoding the path
+#set(DSO_PATH $ENV{DSO_PATH})
+set(DSO_PATH "/home/daniel/git/dso")
+
+message("\n\n---- LOOKING FOR DSO at\n\"${DSO_PATH}\"")
+
+find_package(Eigen3 REQUIRED)
+find_package(Boost COMPONENTS system thread)
+find_package(LibZip)
+find_package(OpenCV)
+find_library(DSO_LIBRARY dso ${DSO_PATH}/build/lib)
+find_package(PCL REQUIRED COMPONENTS common io features)
+
+
+# march (and SSE?) flags are needed to prevent eigen from segfaulting. TODO: why?
+set(CMAKE_CXX_FLAGS
+   #"${SSE_FLAGS} -std=c++14 -O2"
+   "${SSE_FLAGS} -O2 -std=c++14 -march=native -Wall"
+)
+
+include_directories(
+    ${DSO_PATH}/src
+    ${DSO_PATH}/thirdparty/Sophus
+    ${EIGEN3_INCLUDE_DIR}
+    ${PCL_INCLUDE_DIRS}
+)
+
+# decide if we have ziplib.
+if (LIBZIP_LIBRARY)
+	message("--- found ziplib (${LIBZIP_VERSION}), compiling with zip capability.")
+	add_definitions(-DHAS_ZIPLIB=1)
+	#include_directories( ${LIBZIP_INCLUDE_DIR_ZIP} ${LIBZIP_INCLUDE_DIR_ZIPCONF} ) 
+else()
+	message("--- not found ziplib (${LIBZIP_LIBRARY}), compiling without zip capability.")
+	set(LIBZIP_LIBRARY "")
+endif()
+
+add_executable(dso_pointcloud_generator
+    src/MapGenerator.h
+
+    src/main_generate_pointclouds.cpp
+    src/MapGenerator.cpp
+)
+
+target_link_libraries(dso_pointcloud_generator
+    ${DSO_LIBRARY}
+    ${OpenCV_LIBS}
+    ${LIBZIP_LIBRARY}
+    boost_system
+    boost_thread
+)
+
+add_executable(pfh_from_ply_test
+    src/main_pfh_from_ply.cpp
+)
+
+target_link_libraries(pfh_from_ply_test
+    ${PCL_COMMON_LIBRARIES} ${PCL_IO_LIBRARIES} ${PCL_FEATURES_LIBRARIES}
+)
+
+
+
+
