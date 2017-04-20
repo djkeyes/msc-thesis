@@ -8,6 +8,9 @@
 #include <list>
 #include <utility>
 
+#include <pcl/io/pcd_io.h>
+#include <pcl/point_types.h>
+
 #include "util/settings.h"
 #include "util/DatasetReader.h"
 #include "util/NumType.h"
@@ -91,7 +94,7 @@ struct DsoOutputRecorder: public Output3DWrapper {
 				int dx = patternP[patternIdx][0];
 				int dy = patternP[patternIdx][1];
 
-				if(dx != 0 || dy != 0){
+				if(dx != 0 || dy != 0) {
 					continue;
 				}
 
@@ -276,17 +279,6 @@ void DsoMapGenerator::savePointCloudAsPly() {
 	out << "ply\n";
 	out << "format binary_little_endian 1.0\n";
 	out << "element vertex " << pointcloud->size() << "\n";
-//	out << "property double x\n";
-//	out << "property double y\n";
-//	out << "property double z\n";
-//	out << "property float intensity\n";
-//	out << "end_header\n";
-//	for (const ColoredPoint& p : *pointcloud) {
-//		out.write((const char*) &p.first.x(), sizeof(double));
-//		out.write((const char*) &p.first.y(), sizeof(double));
-//		out.write((const char*) &p.first.z(), sizeof(double));
-//		out.write((const char*) &p.second, sizeof(float));
-//	}
 
 	out << "property float x\n";
 	out << "property float y\n";
@@ -294,6 +286,7 @@ void DsoMapGenerator::savePointCloudAsPly() {
 	out << "property float intensity\n";
 	out << "end_header\n";
 	for (const ColoredPoint& p : *pointcloud) {
+		// TODO: we lose precision here, but meshlab won't work if we use a double. why?
 		float x = (float) p.first.x();
 		float y = (float) p.first.y();
 		float z = (float) p.first.z();
@@ -305,6 +298,25 @@ void DsoMapGenerator::savePointCloudAsPly() {
 	}
 
 	out.close();
+
+}
+void DsoMapGenerator::savePointCloudAsPcd() {
+	pcl::PointCloud<pcl::PointXYZI> cloud;
+	cloud.width = pointcloud->size();
+	cloud.height = 1;
+	cloud.is_dense = false;
+	cloud.points.resize(cloud.width * cloud.height);
+
+	auto iter = pointcloud->begin();
+	for (size_t i = 0; i < cloud.points.size(); ++i, ++iter) {
+		cloud.points[i].x = iter->first.x();
+		cloud.points[i].y = iter->first.y();
+		cloud.points[i].z = iter->first.z();
+		cloud.points[i].intensity = iter->second;
+	}
+	pcl::io::savePCDFileBinary("map-no-pattern.pcd", cloud);
+}
+void DsoMapGenerator::savePointCloudAsManyPcds() {
 
 }
 void DsoMapGenerator::saveDepthMaps() {
@@ -414,6 +426,10 @@ ArtificialMapGenerator::ArtificialMapGenerator() {
 void ArtificialMapGenerator::runVisualOdometry() {
 }
 void ArtificialMapGenerator::savePointCloudAsPly() {
+}
+void ArtificialMapGenerator::savePointCloudAsPcd() {
+}
+void ArtificialMapGenerator::savePointCloudAsManyPcds() {
 }
 void ArtificialMapGenerator::saveDepthMaps() {
 }

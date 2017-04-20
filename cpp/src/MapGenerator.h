@@ -22,6 +22,8 @@ public:
 
 	virtual void runVisualOdometry() = 0;
 	virtual void savePointCloudAsPly() = 0;
+	virtual void savePointCloudAsPcd() = 0;
+	virtual void savePointCloudAsManyPcds() = 0;
 	virtual void saveDepthMaps() = 0;
 };
 
@@ -35,6 +37,8 @@ public:
 
 	void runVisualOdometry() override;
 	void savePointCloudAsPly() override;
+	void savePointCloudAsPcd() override;
+	void savePointCloudAsManyPcds() override;
 	void saveDepthMaps() override;
 private:
 	void parseArgument(char* arg);
@@ -55,6 +59,8 @@ public:
 
 	void runVisualOdometry() override;
 	void savePointCloudAsPly() override;
+	void savePointCloudAsPcd() override;
+	void savePointCloudAsManyPcds() override;
 	void saveDepthMaps() override;
 };
 

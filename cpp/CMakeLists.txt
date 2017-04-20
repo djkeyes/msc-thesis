@@ -60,6 +60,8 @@ target_link_libraries(dso_pointcloud_generator
     ${LIBZIP_LIBRARY}
     boost_system
     boost_thread
+    ${PCL_COMMON_LIBRARIES}
+    ${PCL_IO_LIBRARIES}
 )
 
 add_executable(pfh_from_ply_test
@@ -67,7 +69,9 @@ add_executable(pfh_from_ply_test
 )
 
 target_link_libraries(pfh_from_ply_test
-    ${PCL_COMMON_LIBRARIES} ${PCL_IO_LIBRARIES} ${PCL_FEATURES_LIBRARIES}
+    ${PCL_COMMON_LIBRARIES}
+    ${PCL_IO_LIBRARIES}
+    ${PCL_FEATURES_LIBRARIES}
 )
 
 
