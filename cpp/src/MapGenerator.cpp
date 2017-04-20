@@ -180,8 +180,9 @@ DsoMapGenerator::DsoMapGenerator(int argc, char** argv) {
 
 	disableAllDisplay = true;
 
-	for (int i = 2; i < argc; i++)
+	for (int i = 0; i < argc; i++) {
 		parseArgument(argv[i]);
+	}
 }
 void DsoMapGenerator::runVisualOdometry() {
 
