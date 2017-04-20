@@ -27,12 +27,15 @@ public:
 	virtual void saveDepthMaps(const std::string& filepath) = 0;
 };
 
+typedef std::pair<dso::Vec3, float> ColoredPoint;
+
 /*
  * Generates a map representation using DSO. This is largely copied from the
  * original DSO command line interface, and accepts similar arguments.
  */
 class DsoMapGenerator: public MapGenerator {
 public:
+
 	DsoMapGenerator(int argc, char** argv);
 
 	void runVisualOdometry() override;
@@ -50,7 +53,12 @@ private:
 
 	int mode = 0;
 
-	std::shared_ptr<std::list<std::pair<dso::Vec3, float>>>pointcloud;
+	std::shared_ptr<std::list<ColoredPoint>> pointcloud;
+	std::shared_ptr<
+			std::map<int,
+					std::pair<dso::SE3,
+							std::shared_ptr<std::list<ColoredPoint>>> > >pointcloudsWithViewpoints;
+
 };
 
 class ArtificialMapGenerator: public MapGenerator {

@@ -7,6 +7,7 @@
 #include <set>
 #include <list>
 #include <utility>
+#include <sstream>
 
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
@@ -24,22 +25,22 @@ using IOWrap::Output3DWrapper;
 
 namespace sdl {
 
-typedef pair<Vec3, float> ColoredPoint;
-
 struct DsoOutputRecorder: public Output3DWrapper {
 	shared_ptr<list<ColoredPoint>> coloredPoints;
+	shared_ptr<map<int, pair<SE3, shared_ptr<list<ColoredPoint>>> > > pointsWithViewpointsById;
+
 	const double my_scaledTH = 1; //1e10;
-	const double my_absTH = 1; //1e10;
-	const double my_minRelBS = 0.005; // 0;
+	const double my_absTH = 1;//1e10;
+	const double my_minRelBS = 0.005;// 0;
 
 	DsoOutputRecorder() :
-			coloredPoints(new list<ColoredPoint>()) {
+	coloredPoints(new list<ColoredPoint>()), pointsWithViewpointsById(new map<int, pair<SE3, shared_ptr<list<ColoredPoint>>> >()) {
 	}
 
 	void publishGraph(
 			const map<uint64_t, Eigen::Vector2i, less<uint64_t>,
-					Eigen::aligned_allocator<pair<uint64_t, Eigen::Vector2i> > > &connectivity)
-					override {
+			Eigen::aligned_allocator<pair<uint64_t, Eigen::Vector2i> > > &connectivity)
+	override {
 		printf("publishGraph() called!\n");
 	}
 
@@ -66,6 +67,7 @@ struct DsoOutputRecorder: public Output3DWrapper {
 		double cxi = calib->cxli();
 		double cyi = calib->cyli();
 
+		shared_ptr<list<ColoredPoint>> current_points(new list<ColoredPoint>());
 		for (PointHessian* point : points) {
 			double z = 1.0 / point->idepth;
 
@@ -106,8 +108,11 @@ struct DsoOutputRecorder: public Output3DWrapper {
 				Vec3 point(x, y, z);
 
 				coloredPoints->push_back(make_pair(camToWorld*point, color));
+				current_points->push_back(make_pair(point, color));
 			}
 		}
+		int frame_id = pointsWithViewpointsById->size();
+		pointsWithViewpointsById->insert(make_pair(frame_id, make_pair(camToWorld, current_points)));
 	}
 
 	void publishKeyframes(vector<FrameHessian*> &frames, bool final,
@@ -267,6 +272,7 @@ void DsoMapGenerator::runVisualOdometry() {
 			MilliSecondsTakenSingle / numFramesProcessed);
 
 	pointcloud = shared_ptr<list<ColoredPoint>>(dso_recorder->coloredPoints);
+	pointcloudsWithViewpoints = dso_recorder->pointsWithViewpointsById;
 	printf("recorded %lu points!\n", pointcloud->size());
 
 	for (IOWrap::Output3DWrapper* ow : fullSystem->outputWrapper) {
@@ -301,23 +307,48 @@ void DsoMapGenerator::savePointCloudAsPly(const std::string& filename) {
 	out.close();
 
 }
-void DsoMapGenerator::savePointCloudAsPcd(const std::string& filename) {
+
+pcl::PointCloud<pcl::PointXYZI> convertListToCloud(
+		shared_ptr<list<ColoredPoint> const> cloudAsList) {
 	pcl::PointCloud<pcl::PointXYZI> cloud;
-	cloud.width = pointcloud->size();
+	cloud.width = cloudAsList->size();
 	cloud.height = 1;
 	cloud.is_dense = false;
 	cloud.points.resize(cloud.width * cloud.height);
 
-	auto iter = pointcloud->begin();
+	auto iter = cloudAsList->begin();
 	for (size_t i = 0; i < cloud.points.size(); ++i, ++iter) {
 		cloud.points[i].x = iter->first.x();
 		cloud.points[i].y = iter->first.y();
 		cloud.points[i].z = iter->first.z();
 		cloud.points[i].intensity = iter->second;
 	}
+	return cloud;
+}
+void DsoMapGenerator::savePointCloudAsPcd(const std::string& filename) {
+	pcl::PointCloud<pcl::PointXYZI> cloud = convertListToCloud(pointcloud);
 	pcl::io::savePCDFileBinary(filename, cloud);
 }
 void DsoMapGenerator::savePointCloudAsManyPcds(const std::string& filepath) {
+
+	for (auto const element : *pointcloudsWithViewpoints) {
+		int id = element.first;
+
+		const SE3& viewpoint = element.second.first;
+
+		pcl::PointCloud<pcl::PointXYZI> cloud = convertListToCloud(
+				element.second.second);
+		cloud.sensor_origin_.head<3>() = viewpoint.translation().cast<float>();
+		cloud.sensor_origin_.w() = 1;
+
+		cloud.sensor_orientation_ =
+				viewpoint.so3().unit_quaternion().cast<float>();
+
+		stringstream filename_stream;
+		filename_stream << filepath << "_" << id << ".pcd";
+		pcl::io::savePCDFileBinary(filename_stream.str(), cloud);
+
+	}
 
 }
 void DsoMapGenerator::saveDepthMaps(const std::string& filepath) {
