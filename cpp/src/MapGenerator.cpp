@@ -274,9 +274,9 @@ void DsoMapGenerator::runVisualOdometry() {
 	}
 
 }
-void DsoMapGenerator::savePointCloudAsPly() {
+void DsoMapGenerator::savePointCloudAsPly(const std::string& filename) {
 	ofstream out;
-	out.open("map-no-pattern.ply", ios::out | ios::trunc | ios::binary);
+	out.open(filename, ios::out | ios::trunc | ios::binary);
 	out << "ply\n";
 	out << "format binary_little_endian 1.0\n";
 	out << "element vertex " << pointcloud->size() << "\n";
@@ -301,7 +301,7 @@ void DsoMapGenerator::savePointCloudAsPly() {
 	out.close();
 
 }
-void DsoMapGenerator::savePointCloudAsPcd() {
+void DsoMapGenerator::savePointCloudAsPcd(const std::string& filename) {
 	pcl::PointCloud<pcl::PointXYZI> cloud;
 	cloud.width = pointcloud->size();
 	cloud.height = 1;
@@ -315,12 +315,12 @@ void DsoMapGenerator::savePointCloudAsPcd() {
 		cloud.points[i].z = iter->first.z();
 		cloud.points[i].intensity = iter->second;
 	}
-	pcl::io::savePCDFileBinary("map-no-pattern.pcd", cloud);
+	pcl::io::savePCDFileBinary(filename, cloud);
 }
-void DsoMapGenerator::savePointCloudAsManyPcds() {
+void DsoMapGenerator::savePointCloudAsManyPcds(const std::string& filepath) {
 
 }
-void DsoMapGenerator::saveDepthMaps() {
+void DsoMapGenerator::saveDepthMaps(const std::string& filepath) {
 }
 
 void DsoMapGenerator::parseArgument(char* arg) {
@@ -426,13 +426,14 @@ ArtificialMapGenerator::ArtificialMapGenerator() {
 }
 void ArtificialMapGenerator::runVisualOdometry() {
 }
-void ArtificialMapGenerator::savePointCloudAsPly() {
+void ArtificialMapGenerator::savePointCloudAsPly(const std::string& filename) {
 }
-void ArtificialMapGenerator::savePointCloudAsPcd() {
+void ArtificialMapGenerator::savePointCloudAsPcd(const std::string& filename) {
 }
-void ArtificialMapGenerator::savePointCloudAsManyPcds() {
+void ArtificialMapGenerator::savePointCloudAsManyPcds(
+		const std::string& filepath) {
 }
-void ArtificialMapGenerator::saveDepthMaps() {
+void ArtificialMapGenerator::saveDepthMaps(const std::string& filepath) {
 }
 
 }

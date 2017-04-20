@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <string>
 
 #include "MapGenerator.h"
 
@@ -11,6 +12,7 @@ using sdl::ArtificialMapGenerator;
 using std::shared_ptr;
 using std::printf;
 using std::strcmp;
+using std::string;
 
 void usage() {
 	// TODO
@@ -18,7 +20,8 @@ void usage() {
 }
 int main(int argc, char** argv) {
 
-	if (argc < 3) {
+	int num_required_args = 4;
+	if (argc < num_required_args) {
 		usage();
 	}
 
@@ -33,11 +36,13 @@ int main(int argc, char** argv) {
 		usage();
 		return 0;
 	}
+	string filename(argv[3]);
 
 	shared_ptr<MapGenerator> map_gen;
 	if (strcmp(argv[1], "dso") == 0) {
 		map_gen = shared_ptr<MapGenerator>(
-				new DsoMapGenerator(argc - 3, argv + 3));
+				new DsoMapGenerator(argc - num_required_args,
+						argv + num_required_args));
 	} else if (strcmp(argv[1], "simulated") == 0) {
 		map_gen = shared_ptr<MapGenerator>(new ArtificialMapGenerator());
 	} else {
@@ -47,11 +52,11 @@ int main(int argc, char** argv) {
 
 	map_gen->runVisualOdometry();
 	if (asPly) {
-		map_gen->savePointCloudAsPly();
+		map_gen->savePointCloudAsPly(filename);
 	} else if (asPcd) {
-		map_gen->savePointCloudAsPcd();
+		map_gen->savePointCloudAsPcd(filename);
 	} else if (asManyPcds) {
-		map_gen->savePointCloudAsManyPcds();
+		map_gen->savePointCloudAsManyPcds(filename);
 	}
 
 	return 0;

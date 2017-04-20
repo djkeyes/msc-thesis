@@ -21,10 +21,10 @@ public:
 	}
 
 	virtual void runVisualOdometry() = 0;
-	virtual void savePointCloudAsPly() = 0;
-	virtual void savePointCloudAsPcd() = 0;
-	virtual void savePointCloudAsManyPcds() = 0;
-	virtual void saveDepthMaps() = 0;
+	virtual void savePointCloudAsPly(const std::string& filename) = 0;
+	virtual void savePointCloudAsPcd(const std::string& filename) = 0;
+	virtual void savePointCloudAsManyPcds(const std::string& filepath) = 0;
+	virtual void saveDepthMaps(const std::string& filepath) = 0;
 };
 
 /*
@@ -36,10 +36,10 @@ public:
 	DsoMapGenerator(int argc, char** argv);
 
 	void runVisualOdometry() override;
-	void savePointCloudAsPly() override;
-	void savePointCloudAsPcd() override;
-	void savePointCloudAsManyPcds() override;
-	void saveDepthMaps() override;
+	void savePointCloudAsPly(const std::string& filename) override;
+	void savePointCloudAsPcd(const std::string& filename) override;
+	void savePointCloudAsManyPcds(const std::string& filepath) override;
+	void saveDepthMaps(const std::string& filepath) override;
 private:
 	void parseArgument(char* arg);
 
@@ -58,10 +58,10 @@ public:
 	ArtificialMapGenerator();
 
 	void runVisualOdometry() override;
-	void savePointCloudAsPly() override;
-	void savePointCloudAsPcd() override;
-	void savePointCloudAsManyPcds() override;
-	void saveDepthMaps() override;
+	void savePointCloudAsPly(const std::string& filename) override;
+	void savePointCloudAsPcd(const std::string& filename) override;
+	void savePointCloudAsManyPcds(const std::string& filepath) override;
+	void saveDepthMaps(const std::string& filepath) override;
 };
 
 }
