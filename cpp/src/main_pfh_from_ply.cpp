@@ -3,11 +3,17 @@
 #include <string>
 #include <vector>
 #include <queue>
+#include <sstream>
+
+#include <boost/filesystem.hpp>
 
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
+#include <pcl/common/transforms.h>
 #include <pcl/features/pfh.h>
 #include <pcl/features/normal_3d.h>
+#include <pcl/search/kdtree.h>
+#include <pcl/search/brute_force.h>
 
 using namespace pcl;
 using namespace std;
@@ -282,6 +288,27 @@ PointCloud<Normal>::Ptr estimateNormals(PointCloud<PointXYZI>::ConstPtr cloud,
 
 	return cloud_normals;
 }
+PointCloud<Normal>::Ptr estimateNormalsWindowedFrame(
+		PointCloud<PointXYZI>::ConstPtr cloud, double search_radius) {
+	// TODO: can use NormalEstimateOMP for drop-in multicore speedup
+	NormalEstimation<PointXYZI, Normal> ne;
+	ne.setInputCloud(cloud);
+
+	// TODO: if we're only using a subset of the data, it might be better to
+	// use a different search structure? maybe brute force exhaustive search?
+	search::KdTree<PointXYZI>::Ptr tree(new search::KdTree<PointXYZI>());
+	ne.setSearchMethod(tree);
+
+	ne.setRadiusSearch(search_radius);
+
+	PointCloud<Normal>::Ptr cloud_normals(new PointCloud<Normal>);
+
+	ne.setViewPoint(cloud->sensor_origin_.x(), cloud->sensor_origin_.y(),
+			cloud->sensor_origin_.z());
+	ne.compute(*cloud_normals);
+
+	return cloud_normals;
+}
 
 PointCloud<PFHSignature125>::Ptr estimatePfh(PointCloud<PointXYZI>::Ptr cloud,
 		PointCloud<Normal>::Ptr cloud_normals, double search_radius) {
@@ -297,8 +324,32 @@ PointCloud<PFHSignature125>::Ptr estimatePfh(PointCloud<PointXYZI>::Ptr cloud,
 	// Output datasets
 	PointCloud<PFHSignature125>::Ptr pfhs(new PointCloud<PFHSignature125>());
 
-	// Use all neighbors in a sphere of radius 5cm
-	// IMPORTANT: the radius used here has to be larger than the radius used to estimate the surface normals!!!
+	// Use all neighbors in a sphere
+	pfh.setRadiusSearch(search_radius);
+
+	// Compute the features
+	pfh.compute(*pfhs);
+
+	return pfhs;
+}
+PointCloud<PFHSignature125>::Ptr estimatePfh(PointCloud<PointXYZI>::Ptr cloud,
+		PointCloud<Normal>::Ptr cloud_normals, const IndicesConstPtr &indices,
+		double search_radius) {
+	PFHEstimation<PointXYZI, Normal, PFHSignature125> pfh;
+	pfh.setInputCloud(cloud);
+	pfh.setInputNormals(cloud_normals);
+	pfh.setIndices(indices);
+
+	// for small subsets of the data, brute force might be faster than rebuilding the tree?
+//	search::BruteForce<PointXYZI>::Ptr search_strategy(new search::BruteForce<PointXYZI>());
+	search::KdTree<PointXYZI>::Ptr search_strategy(
+			new search::KdTree<PointXYZI>());
+	pfh.setSearchMethod(search_strategy);
+
+	// Output datasets
+	PointCloud<PFHSignature125>::Ptr pfhs(new PointCloud<PFHSignature125>());
+
+	// Use all neighbors in a sphere
 	pfh.setRadiusSearch(search_radius);
 
 	// Compute the features
@@ -307,18 +358,150 @@ PointCloud<PFHSignature125>::Ptr estimatePfh(PointCloud<PointXYZI>::Ptr cloud,
 	return pfhs;
 }
 
+void saveResultsToFile(const PointCloud<PointXYZI>& cloud,
+		const PointCloud<Normal>& cloud_normals,
+		const PointCloud<PFHSignature125>& cloud_pfhs) {
+	if (save_as_pcd) {
+		PointCloud<PointNormalPFH125> cloud_combined;
+		for (size_t i = 0; i < cloud_pfhs.size(); ++i) {
+			PointNormalPFH125 point;
+			copy(&cloud.at(i).data[0], &cloud.at(i).data[4], point.data);
+			copy(&cloud_normals.at(i).data_n[0], &cloud_normals.at(i).data_n[4],
+					point.data_n);
+			copy(&cloud_normals.at(i).data_c[0], &cloud_normals.at(i).data_c[4],
+					point.data_c);
+			copy(&cloud_pfhs.at(i).histogram[0],
+					&cloud_pfhs.at(i).histogram[PFHSignature125::descriptorSize()],
+					point.histogram);
+
+			cloud_combined.push_back(point);
+		}
+		io::savePCDFileBinary(outfile, cloud_combined);
+	} else {
+		ofstream out;
+		out.open(outfile, ios::out | ios::trunc | ios::binary);
+		for (size_t i = 0; i < cloud_pfhs.size(); i++) {
+			out << cloud.at(i) << " " << cloud_normals.at(i) << " "
+					<< cloud_pfhs.at(i) << endl;
+		}
+		out.close();
+		cout << "wrote " << cloud_pfhs.size() << " lines!" << endl;
+	}
+}
+
 /*
  * This computes normals, using only points located in the last window_size
  * keyframes before the current one one, and the first window_size after it.
  * Points in the first and last window_size keyframes are ignored.
  */
-int doIncrementalEstimate(const string& filepattern, int window_size) {
+int doIncrementalEstimate(const string& filepattern, int window_size,
+		double normalRadius, double pfhRadius) {
+	PointCloud<PointXYZI>::Ptr cumulative_cloud(new PointCloud<PointXYZI>);
+	list<PointCloud<PointXYZI>::Ptr> clouds_in_window;
 
+	// load the first few without computing normals
+	for (int i = 0; i <= 2 * window_size; ++i) {
+		PointCloud<PointXYZI>::Ptr cur_cloud(new PointCloud<PointXYZI>);
+		stringstream filename;
+		filename << filepattern << "_" << i << ".pcd";
+		if (io::loadPCDFile<PointXYZI>(filename.str(), *cur_cloud) == -1) //* load the file
+				{
+			PCL_ERROR("Couldn't read file %s \n", filepattern);
+			return -1;
+		}
+		transformPointCloud(*cur_cloud, *cur_cloud,
+				cur_cloud->sensor_origin_.head<3>(),
+				cur_cloud->sensor_orientation_);
+
+		cumulative_cloud->points.insert(end(cumulative_cloud->points),
+				begin(cur_cloud->points), end(cur_cloud->points));
+		clouds_in_window.push_back(cur_cloud);
+	}
+
+	int i = window_size;
+	size_t points_before = 0;
+	auto cloud_iter = clouds_in_window.begin();
+	for (int j = 0; j < window_size; ++j, ++cloud_iter) {
+		points_before += (*cloud_iter)->size();
+	}
+
+	PointCloud<PointXYZI> result_points;
+	PointCloud<Normal> result_normals;
+	PointCloud<PFHSignature125> result_pfhs;
+
+	while (true) {
+		if (i % 10 == 0) {
+			cout << "processing frame " << i << endl;
+		}
+		size_t current_num_points = (*cloud_iter)->size();
+		IndicesPtr indices(new vector<int>(current_num_points));
+		for (size_t j = 0; j < current_num_points; j++) {
+			indices->at(j) = j + points_before;
+		}
+
+//		cout << "estimating normals..." << endl;
+		// compute normals for the whole windowed cloud (need all of them even
+		// to compute pfh at only a subset)
+		PointCloud<Normal>::Ptr cloud_normals = estimateNormalsWindowedFrame(
+				cumulative_cloud, normalRadius);
+
+//		cout << "estimating pfh..." << endl;
+		// only compute pfh at current indices
+		PointCloud<PFHSignature125>::Ptr cloud_pfhs = estimatePfh(
+				cumulative_cloud, cloud_normals, indices, pfhRadius);
+
+//		cout << "finished estimated, performing bookkeeping..." << endl;
+
+		// store results
+		result_points.insert(begin(result_points), begin((*cloud_iter)->points),
+				end((*cloud_iter)->points));
+		// only select the normals in the middle frame
+		result_normals.insert(begin(result_normals),
+				&cloud_normals->points.begin()[points_before],
+				&cloud_normals->points.begin()[points_before
+						+ current_num_points]);
+		result_pfhs.insert(begin(result_pfhs), begin(cloud_pfhs->points),
+				end(cloud_pfhs->points));
+
+		// remove points from frame i-window_size
+		auto front = begin(cumulative_cloud->points);
+		size_t num_to_remove = clouds_in_window.front()->size();
+		cumulative_cloud->points.erase(front, front + num_to_remove);
+		points_before -= num_to_remove;
+		clouds_in_window.pop_front();
+
+		// add points in frame i+1+window_size
+		PointCloud<PointXYZI>::Ptr next_cloud(new PointCloud<PointXYZI>);
+		stringstream filename;
+		filename << filepattern << "_" << (i + 1 + window_size) << ".pcd";
+
+		if (!boost::filesystem::exists(filename.str())) {
+			// TODO: scan the whole directory explicitly ahead of time
+			break;
+		}
+		if (io::loadPCDFile<PointXYZI>(filename.str(), *next_cloud) == -1) {
+			PCL_ERROR("Couldn't read file %s \n", filepattern);
+			return -1;
+		}
+		transformPointCloud(*next_cloud, *next_cloud,
+				next_cloud->sensor_origin_.head<3>(),
+				next_cloud->sensor_orientation_);
+
+		points_before += current_num_points;
+		cumulative_cloud->points.insert(end(cumulative_cloud->points),
+				begin(next_cloud->points), end(next_cloud->points));
+		clouds_in_window.push_back(next_cloud);
+		++i;
+		++cloud_iter;
+	}
+
+	saveResultsToFile(result_points, result_normals, result_pfhs);
 
 	return 0;
 }
 
-int doFullEstimate(const string& filepattern) {
+int doFullEstimate(const string& filepattern, double normalRadius,
+		double pfhRadius) {
 	PointCloud<PointXYZI>::Ptr cloud(new PointCloud<PointXYZI>);
 
 	if (io::loadPCDFile<PointXYZI>(filepattern, *cloud) == -1) //* load the file
@@ -334,45 +517,16 @@ int doFullEstimate(const string& filepattern) {
 	// be very slow for points far from the initial camera position
 	random_shuffle(cloud->begin(), cloud->end());
 
-	// note: the normal computation search radius must be smaller than the PFH search radius
-	double normalRadius = 0.05;
-	double pfhRadius = normalRadius * 1.1;
-
 	PointCloud<Normal>::Ptr cloud_normals = estimateNormals(cloud,
 			normalRadius);
 
-	cout << "estimating normals... (this'll take a while)" << endl;
+	cout << "estimating pfh... (this'll take a while)" << endl;
 	PointCloud<PFHSignature125>::Ptr cloud_pfhs = estimatePfh(cloud,
 			cloud_normals, pfhRadius);
-	cout << "finished estimating normals!" << endl;
+	cout << "finished estimating pfh!" << endl;
 	cout << "writing output to file..." << endl;
 
-	if (save_as_pcd) {
-		PointCloud<PointNormalPFH125> cloud_combined;
-		for (size_t i = 0; i < cloud_pfhs->size(); ++i) {
-			PointNormalPFH125 point;
-			copy(&cloud->at(i).data[0], &cloud->at(i).data[4], point.data);
-			copy(&cloud_normals->at(i).data_n[0],
-					&cloud_normals->at(i).data_n[4], point.data_n);
-			copy(&cloud_normals->at(i).data_c[0],
-					&cloud_normals->at(i).data_c[4], point.data_c);
-			copy(&cloud_pfhs->at(i).histogram[0],
-					&cloud_pfhs->at(i).histogram[PFHSignature125::descriptorSize()],
-					point.histogram);
-
-			cloud_combined.push_back(point);
-		}
-		io::savePCDFileBinary(outfile, cloud_combined);
-	} else {
-		ofstream out;
-		out.open(outfile, ios::out | ios::trunc | ios::binary);
-		for (size_t i = 0; i < cloud_pfhs->size(); i++) {
-			out << cloud->at(i) << " " << cloud_normals->at(i) << " "
-					<< cloud_pfhs->at(i) << endl;
-		}
-		out.close();
-		cout << "wrote " << cloud_pfhs->size() << " lines!" << endl;
-	}
+	saveResultsToFile(*cloud, *cloud_normals, *cloud_pfhs);
 
 	cout << "done, exiting!" << endl;
 	return 0;
@@ -411,6 +565,10 @@ void parseArgument(char* arg) {
 
 int main(int argc, char** argv) {
 
+	// note: the normal computation search radius must be smaller than the PFH search radius
+	double normalRadius = 0.05;
+	double pfhRadius = normalRadius * 1.1;
+
 	if (argc < 4) {
 		printf("too few arguments!\n");
 		// TODO: print usage
@@ -423,8 +581,8 @@ int main(int argc, char** argv) {
 	}
 
 	if (compute_incrementally) {
-		return doIncrementalEstimate(filepattern, 10);
+		return doIncrementalEstimate(filepattern, 10, normalRadius, pfhRadius);
 	} else {
-		return doFullEstimate(filepattern);
+		return doFullEstimate(filepattern, normalRadius, pfhRadius);
 	}
 }
