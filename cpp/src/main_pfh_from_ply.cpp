@@ -4,13 +4,42 @@
 #include <vector>
 #include <queue>
 
-#include <pcl/io/ply_io.h>
+#include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
 #include <pcl/features/pfh.h>
 #include <pcl/features/normal_3d.h>
 
 using namespace pcl;
 using namespace std;
+
+string outfile;
+bool save_as_pcd;
+bool compute_incrementally;
+
+/*
+ * Point with position, surface normal estimate, and a 125-feature PFH descriptor
+ */
+struct PointNormalPFH125 {
+	PCL_ADD_POINT4D
+	; // adds x, y, z (stored in float[4])
+	PCL_ADD_NORMAL4D
+	; // adds normal_x, normal_y, normal_z (stored in float[4])
+	union {
+		struct {
+			float curvature;
+		};
+		float data_c[4];
+	};
+
+	float histogram[125];
+	static int descriptorSize() {
+		return 125;
+	}
+	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+}EIGEN_ALIGN16;
+
+POINT_CLOUD_REGISTER_POINT_STRUCT(PointNormalPFH125,
+		(float, x, x) (float, y, y) (float, z, z) (float, normal_x, normal_x) (float, normal_y, normal_y) (float, normal_z, normal_z) (float, curvature, curvature) (float[125], histogram, pfh));
 
 /*
  * Extend NormalEstimation to provide some statistics about the computation time.
@@ -278,17 +307,27 @@ PointCloud<PFHSignature125>::Ptr estimatePfh(PointCloud<PointXYZI>::Ptr cloud,
 	return pfhs;
 }
 
-int main(int argc, char** argv) {
+/*
+ * This computes normals, using only points located in the last window_size
+ * keyframes before the current one one, and the first window_size after it.
+ * Points in the first and last window_size keyframes are ignored.
+ */
+int doIncrementalEstimate(const string& filepattern, int window_size) {
+
+
+	return 0;
+}
+
+int doFullEstimate(const string& filepattern) {
 	PointCloud<PointXYZI>::Ptr cloud(new PointCloud<PointXYZI>);
 
-	string filename = "map-no-pattern.ply";
-	if (io::loadPLYFile<PointXYZI>(filename, *cloud) == -1) //* load the file
+	if (io::loadPCDFile<PointXYZI>(filepattern, *cloud) == -1) //* load the file
 			{
-		PCL_ERROR("Couldn't read file test_pcd.pcd \n");
-		return (-1);
+		PCL_ERROR("Couldn't read file %s \n", filepattern);
+		return -1;
 	}
 	cout << "Loaded " << cloud->width * cloud->height << " data points from "
-			<< filename << endl;
+			<< filepattern << endl;
 
 	// the flann kd search tree is somehow built incrementally based on the
 	// pointcloud index ordering. randomize the order, otherwise the tree will
@@ -308,14 +347,84 @@ int main(int argc, char** argv) {
 	cout << "finished estimating normals!" << endl;
 	cout << "writing output to file..." << endl;
 
-	ofstream out;
-	out.open("points_normals_pfhs.out", ios::out | ios::trunc | ios::binary);
-	for (size_t i = 0; i < cloud_pfhs->size(); i++) {
-		out << cloud->at(i) << " " << cloud_normals->at(i) << " "
-				<< cloud_pfhs->at(i) << endl;
+	if (save_as_pcd) {
+		PointCloud<PointNormalPFH125> cloud_combined;
+		for (size_t i = 0; i < cloud_pfhs->size(); ++i) {
+			PointNormalPFH125 point;
+			copy(&cloud->at(i).data[0], &cloud->at(i).data[4], point.data);
+			copy(&cloud_normals->at(i).data_n[0],
+					&cloud_normals->at(i).data_n[4], point.data_n);
+			copy(&cloud_normals->at(i).data_c[0],
+					&cloud_normals->at(i).data_c[4], point.data_c);
+			copy(&cloud_pfhs->at(i).histogram[0],
+					&cloud_pfhs->at(i).histogram[PFHSignature125::descriptorSize()],
+					point.histogram);
+
+			cloud_combined.push_back(point);
+		}
+		io::savePCDFileBinary(outfile, cloud_combined);
+	} else {
+		ofstream out;
+		out.open(outfile, ios::out | ios::trunc | ios::binary);
+		for (size_t i = 0; i < cloud_pfhs->size(); i++) {
+			out << cloud->at(i) << " " << cloud_normals->at(i) << " "
+					<< cloud_pfhs->at(i) << endl;
+		}
+		out.close();
+		cout << "wrote " << cloud_pfhs->size() << " lines!" << endl;
 	}
-	out.close();
 
 	cout << "done, exiting!" << endl;
+	return 0;
+}
 
+void parseArgument(char* arg) {
+	int option;
+	char buf[1000];
+
+	if (1 == sscanf(arg, "pcd_out=%s", buf)) {
+		outfile = string(buf);
+		printf("saving pcd file to %s\n", outfile.c_str());
+		save_as_pcd = true;
+		return;
+	}
+
+	if (1 == sscanf(arg, "txt_out=%s", buf)) {
+		outfile = string(buf);
+		printf("saving ascii text file to %s\n", outfile.c_str());
+		save_as_pcd = false;
+		return;
+	}
+
+	if (1 == sscanf(arg, "incremental=%d", &option)) {
+		if (option == 1) {
+			printf("computing normals incrementally\n");
+			compute_incrementally = true;
+		} else {
+			printf("computing normals on the full pointcloud\n");
+			compute_incrementally = false;
+		}
+		return;
+	}
+	printf("could not parse argument \"%s\"!!!!\n", arg);
+}
+
+int main(int argc, char** argv) {
+
+	if (argc < 4) {
+		printf("too few arguments!\n");
+		// TODO: print usage
+		return 1;
+	}
+
+	string filepattern(argv[1]);
+	for (int i = 2; i < argc; i++) {
+		parseArgument(argv[i]);
+	}
+
+	if (compute_incrementally) {
+		return doIncrementalEstimate(filepattern, 10);
+	} else {
+		return doFullEstimate(filepattern);
+	}
 }

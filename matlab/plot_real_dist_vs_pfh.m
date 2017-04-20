@@ -1,7 +1,7 @@
 
 
 
-filename = '~/dev/msc-thesis/build/points_normals_pfhs.out';
+filename = '~/dev/msc-thesis/cpp/build/points_normals_pfhs.txt';
 
 fid = fopen(filename);
 % linelen = 4 + 4 + 125;
