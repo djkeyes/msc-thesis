@@ -25,42 +25,49 @@ using IOWrap::Output3DWrapper;
 
 namespace sdl {
 
+bool print_debug_info = false;
+
 struct DsoOutputRecorder: public Output3DWrapper {
 	shared_ptr<list<ColoredPoint>> coloredPoints;
 	shared_ptr<map<int, pair<SE3, shared_ptr<list<ColoredPoint>>> > > pointsWithViewpointsById;
+	shared_ptr<map<int, shared_ptr<MinimalImageF>>> depthImagesById;
+	shared_ptr<map<int, shared_ptr<MinimalImageF>>> rgbImagesById;
 
 	const double my_scaledTH = 1; //1e10;
 	const double my_absTH = 1;//1e10;
 	const double my_minRelBS = 0.005;// 0;
 
 	DsoOutputRecorder() :
-	coloredPoints(new list<ColoredPoint>()), pointsWithViewpointsById(new map<int, pair<SE3, shared_ptr<list<ColoredPoint>>> >()) {
+	coloredPoints(new list<ColoredPoint>()),
+	pointsWithViewpointsById(new map<int, pair<SE3, shared_ptr<list<ColoredPoint>>> >()),
+	depthImagesById(new map<int, shared_ptr<MinimalImageF>>()),
+	rgbImagesById(new map<int, shared_ptr<MinimalImageF>>()) {
 	}
 
 	void publishGraph(
 			const map<uint64_t, Eigen::Vector2i, less<uint64_t>,
 			Eigen::aligned_allocator<pair<uint64_t, Eigen::Vector2i> > > &connectivity)
 	override {
-		printf("publishGraph() called!\n");
 	}
 
 	void printPoint(const PointHessian* const & point) {
-		printf("\tcolor=[%f, %f, %f, %f, %f, %f, %f, %f], "
-				"uv=[%f, %f], idepth=%f, idepth_backup=%f, "
-				"idepth_hessian=%f, idepth_scaled=%f, "
-				"idepth_zero=%f, idepth_zero_scaled=%f, "
-				"idx=%d, instanceCounter=%d, status=%d\n", point->color[0],
-				point->color[1], point->color[2], point->color[3],
-				point->color[4], point->color[5], point->color[6],
-				point->color[7], point->u, point->v, point->idepth,
-				point->idepth_backup, point->idepth_hessian,
-				point->idepth_scaled, point->idepth_zero,
-				point->idepth_zero_scaled, point->idx, point->instanceCounter,
-				point->status);
-	}
+		if(print_debug_info) {
+			printf("\tcolor=[%f, %f, %f, %f, %f, %f, %f, %f], "
+					"uv=[%f, %f], idepth=%f, idepth_backup=%f, "
+					"idepth_hessian=%f, idepth_scaled=%f, "
+					"idepth_zero=%f, idepth_zero_scaled=%f, "
+					"idx=%d, instanceCounter=%d, status=%d\n", point->color[0],
+					point->color[1], point->color[2], point->color[3],
+					point->color[4], point->color[5], point->color[6],
+					point->color[7], point->u, point->v, point->idepth,
+					point->idepth_backup, point->idepth_hessian,
+					point->idepth_scaled, point->idepth_zero,
+					point->idepth_zero_scaled, point->idx, point->instanceCounter,
+					point->status);
+		}}
 
 	void addPoints(const vector<PointHessian*>& points, CalibHessian* calib,
-			const SE3& camToWorld) {
+			const SE3& camToWorld, int frame_id) {
 
 		double fxi = calib->fxli();
 		double fyi = calib->fyli();
@@ -78,17 +85,22 @@ struct DsoOutputRecorder: public Output3DWrapper {
 			float z4 = z * z * z * z;
 			float var = (1.0f / (point->idepth_hessian + 0.01));
 			if (var * z4 > my_scaledTH) {
-				printf("skipping because large var (%f) * z^4 (%f) = %f > %f\n",
-						var, z4, var * z4, my_scaledTH);
+				if(print_debug_info) {
+					printf("skipping because large var (%f) * z^4 (%f) = %f > %f\n",
+							var, z4, var * z4, my_scaledTH);
+				}
 				continue;
 			}
 			if (var > my_absTH) {
-				printf("skipping because large var (%f) > %f\n", var, my_absTH);
+				if(print_debug_info) {
+					printf("skipping because large var (%f) > %f\n", var, my_absTH);}
 				continue;
 			}
 			if (point->maxRelBaseline < my_minRelBS) {
-				printf("skipping because large maxRelBaseline (%f) < %f\n",
-						point->maxRelBaseline, my_minRelBS);
+				if(print_debug_info) {
+					printf("skipping because large maxRelBaseline (%f) < %f\n",
+							point->maxRelBaseline, my_minRelBS);
+				}
 				continue;
 			}
 
@@ -111,7 +123,6 @@ struct DsoOutputRecorder: public Output3DWrapper {
 				current_points->push_back(make_pair(point, color));
 			}
 		}
-		int frame_id = pointsWithViewpointsById->size();
 		pointsWithViewpointsById->insert(make_pair(frame_id, make_pair(camToWorld, current_points)));
 	}
 
@@ -124,8 +135,20 @@ struct DsoOutputRecorder: public Output3DWrapper {
 			// but since it's final, this indicates there are no points in pointHessians (which has "active points").
 			// for now, just project pointHessiansMarginalized and pointHessiansOut (ImmaturePoints has large
 			// uncertainties, but we could experiment with those, too)
-			addPoints(fh->pointHessiansMarginalized, HCalib, fh->PRE_camToWorld);
-//			addPoints(fh->pointHessiansOut, HCalib, fh->PRE_camToWorld);
+			addPoints(fh->pointHessiansMarginalized, HCalib, fh->PRE_camToWorld, fh->shell->incoming_id);
+//			addPoints(fh->pointHessiansOut, HCalib, fh->PRE_camToWorld, fh->shell->incoming_id);
+
+			// also extract and save the image
+			int width = wG[0];
+			int height = hG[0];
+			shared_ptr<MinimalImageF> image(new MinimalImageF(width, height));
+			for(int i=0; i < width*height; i++) {
+				// I think the first component of this just contains the raw images.
+				// dI[i][j] contains the ith pyrimidal level and the gradient in
+				// the jth direction, for i, j >= 1
+				image->data[i] = fh->dI[i][0];
+			}
+			rgbImagesById->insert(make_pair(fh->shell->incoming_id, image));
 		}
 	}
 
@@ -138,23 +161,23 @@ struct DsoOutputRecorder: public Output3DWrapper {
 	}
 
 	void pushDepthImage(MinimalImageB3* image) override {
-//		printf("pushDepthImage() called!\n");
 	}
 	bool needPushDepthImage() override {
-//		printf("needPushDepthImage() called! (returned false)\n");
 		return false;
 	}
 
-	void pushDepthImageFloat(MinimalImageF* image, FrameHessian* KF) {
-//		printf("pushDepthImageFloat() called!\n");
+	void pushDepthImageFloat(MinimalImageF* image, FrameHessian* KF) override {
+		int id = KF->shell->incoming_id;
+		// make a copy of the image, otherwise might be erased
+		depthImagesById->insert(make_pair(id, shared_ptr<MinimalImageF>(image->getClone())));
 	}
 
 	void join() override {
-		printf("join() called!\n");
+//		printf("join() called!\n");
 	}
 
 	void reset() override {
-		printf("reset() called!\n");
+//		printf("reset() called!\n");
 	}
 
 };
@@ -163,7 +186,6 @@ struct DsoOutputRecorder: public Output3DWrapper {
 // with the variables in util/settings.h. Can we wrap that somehow?
 
 DsoMapGenerator::DsoMapGenerator(int argc, char** argv) {
-
 	setting_desiredImmatureDensity = 1500;
 	setting_desiredPointDensity = 2000;
 	setting_minFrames = 5;
@@ -171,15 +193,18 @@ DsoMapGenerator::DsoMapGenerator(int argc, char** argv) {
 	setting_maxOptIterations = 6;
 	setting_minOptIterations = 1;
 
-	printf("DEFAULT settings:\n"
-			"- %s real-time enforcing\n"
-			"- %f active points\n"
-			"- %d-%d active frames\n"
-			"- %d-%d LM iteration each KF\n"
-			"- original image resolution\n"
-			"See MapGenerator.cpp to expose more settings\n", "not",
-			setting_desiredPointDensity, setting_minFrames, setting_maxFrames,
-			setting_minOptIterations, setting_maxOptIterations);
+	if (print_debug_info) {
+		printf("DEFAULT settings:\n"
+				"- %s real-time enforcing\n"
+				"- %f active points\n"
+				"- %d-%d active frames\n"
+				"- %d-%d LM iteration each KF\n"
+				"- original image resolution\n"
+				"See MapGenerator.cpp to expose more settings\n", "not",
+				setting_desiredPointDensity, setting_minFrames,
+				setting_maxFrames, setting_minOptIterations,
+				setting_maxOptIterations);
+	}
 
 	setting_logStuff = false;
 
@@ -189,38 +214,64 @@ DsoMapGenerator::DsoMapGenerator(int argc, char** argv) {
 		parseArgument(argv[i]);
 	}
 }
-void DsoMapGenerator::runVisualOdometry() {
+DsoMapGenerator::DsoMapGenerator(const string& input_path) {
+	setting_desiredImmatureDensity = 1500;
+	setting_desiredPointDensity = 2000;
+	setting_minFrames = 5;
+	setting_maxFrames = 7;
+	setting_maxOptIterations = 6;
+	setting_minOptIterations = 1;
 
-	shared_ptr<ImageFolderReader> reader(
+	setting_logStuff = false;
+
+	disableAllDisplay = true;
+
+	setting_debugout_runquiet = true;
+
+	// to handle datasets other than tum monoVO, we'll need to change these
+	// paths, and change the mode and photometric calibration weights
+	source = input_path + "/images.zip";
+	calib = input_path + "/camera.txt";
+	vignette = input_path + "/vignette.png";
+	gammaCalib = input_path + "/pcalib.txt";
+
+	mode = 0;
+}
+void DsoMapGenerator::initVisualOdometry() {
+	reader = shared_ptr<ImageFolderReader>(
 			new ImageFolderReader(source, calib, gammaCalib, vignette));
 	reader->setGlobalCalibration();
 
 	if (setting_photometricCalibration > 0
 			&& reader->getPhotometricGamma() == 0) {
 		printf(
-				"ERROR: dont't have photometric calibation. Need to use commandline options mode=1 ");
+				"ERROR: don't have photometric calibation. Need to use commandline options mode=1 ");
 		exit(1);
 	}
+}
+void DsoMapGenerator::runVisualOdometry() {
+	vector<int> idsToPlay;
+	for (int i = 0; i < reader->getNumImages(); ++i) {
+		idsToPlay.push_back(i);
+	}
+	runVisualOdometry(idsToPlay);
+}
+void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
 
 	shared_ptr<FullSystem> fullSystem(new FullSystem());
 	fullSystem->setGammaFunction(reader->getPhotometricGamma());
 	unique_ptr<DsoOutputRecorder> dso_recorder(new DsoOutputRecorder());
 	fullSystem->outputWrapper.push_back(dso_recorder.get());
 
-	vector<int> idsToPlay;
-	for (int i = 0; i < reader->getNumImages(); ++i) {
-		idsToPlay.push_back(i);
-	}
-
 	clock_t started = clock();
 
-	for (int i = 0; i < (int) idsToPlay.size(); i++) {
+	for (int i = 0; i < (int) ids_to_play.size(); i++) {
 		if (!fullSystem->initialized)	// if not initialized: reset start time.
 		{
 			started = clock();
 		}
 
-		int id = idsToPlay[i];
+		int id = ids_to_play[i];
 
 		ImageAndExposure* img = reader->getImage(id);
 
@@ -230,7 +281,9 @@ void DsoMapGenerator::runVisualOdometry() {
 
 		if (fullSystem->initFailed || setting_fullResetRequested) {
 			if (i < 250 || setting_fullResetRequested) {
-				printf("RESETTING!\n");
+				if (print_debug_info) {
+					printf("RESETTING!\n");
+				}
 
 				vector<IOWrap::Output3DWrapper*> wraps =
 						fullSystem->outputWrapper;
@@ -247,7 +300,9 @@ void DsoMapGenerator::runVisualOdometry() {
 		}
 
 		if (fullSystem->isLost) {
-			printf("LOST!!\n");
+			if (print_debug_info) {
+				printf("LOST!!\n");
+			}
 			break;
 		}
 
@@ -257,30 +312,43 @@ void DsoMapGenerator::runVisualOdometry() {
 
 	fullSystem->printResult("result.txt");
 
-	int numFramesProcessed = idsToPlay.size();
+	int numFramesProcessed = ids_to_play.size();
 	double numSecondsProcessed = fabs(
-			reader->getTimestamp(idsToPlay[0])
-					- reader->getTimestamp(idsToPlay.back()));
+			reader->getTimestamp(ids_to_play[0])
+					- reader->getTimestamp(ids_to_play.back()));
 	double MilliSecondsTakenSingle = 1000.0f * (ended - started)
 			/ (float) (CLOCKS_PER_SEC);
-	printf("\n======================"
-			"\n%d Frames (recorded at %.1f fps)"
-			"\n%.2fms total"
-			"\n%.2fms per frame"
-			"\n======================\n\n", numFramesProcessed,
-			numFramesProcessed / numSecondsProcessed, MilliSecondsTakenSingle,
-			MilliSecondsTakenSingle / numFramesProcessed);
+	if (print_debug_info) {
+		printf("\n======================"
+				"\n%d Frames (recorded at %.1f fps)"
+				"\n%.2fms total"
+				"\n%.2fms per frame"
+				"\n======================\n\n", numFramesProcessed,
+				numFramesProcessed / numSecondsProcessed,
+				MilliSecondsTakenSingle,
+				MilliSecondsTakenSingle / numFramesProcessed);
+	}
 
 	pointcloud = shared_ptr<list<ColoredPoint>>(dso_recorder->coloredPoints);
 	pointcloudsWithViewpoints = dso_recorder->pointsWithViewpointsById;
-	printf("recorded %lu points!\n", pointcloud->size());
+	depthImages = dso_recorder->depthImagesById;
+	rgbImages = dso_recorder->rgbImagesById;
+
+	if (print_debug_info) {
+		printf("recorded %lu points!\n", pointcloud->size());
+	}
 
 	for (IOWrap::Output3DWrapper* ow : fullSystem->outputWrapper) {
 		ow->join();
 	}
 
 }
-void DsoMapGenerator::savePointCloudAsPly(const std::string& filename) {
+void DsoMapGenerator::savePointCloudAsPly(const string& filename) {
+	string path(filename.substr(0, filename.rfind("/") + 1));
+	// create directory if it doesn't exist
+	boost::filesystem::path dir(path.c_str());
+	boost::filesystem::create_directories(dir);
+
 	ofstream out;
 	out.open(filename, ios::out | ios::trunc | ios::binary);
 	out << "ply\n";
@@ -325,11 +393,21 @@ pcl::PointCloud<pcl::PointXYZI> convertListToCloud(
 	}
 	return cloud;
 }
-void DsoMapGenerator::savePointCloudAsPcd(const std::string& filename) {
+void DsoMapGenerator::savePointCloudAsPcd(const string& filename) {
+	string path(filename.substr(0, filename.rfind("/") + 1));
+	// create directory if it doesn't exist
+	boost::filesystem::path dir(path.c_str());
+	boost::filesystem::create_directories(dir);
+
 	pcl::PointCloud<pcl::PointXYZI> cloud = convertListToCloud(pointcloud);
 	pcl::io::savePCDFileBinary(filename, cloud);
 }
-void DsoMapGenerator::savePointCloudAsManyPcds(const std::string& filepath) {
+void DsoMapGenerator::savePointCloudAsManyPcds(const string& filepath) {
+
+	string path(filepath.substr(0, filepath.rfind("/") + 1));
+	// create directory if it doesn't exist
+	boost::filesystem::path dir(path.c_str());
+	boost::filesystem::create_directories(dir);
 
 	for (auto const element : *pointcloudsWithViewpoints) {
 		int id = element.first;
@@ -351,7 +429,43 @@ void DsoMapGenerator::savePointCloudAsManyPcds(const std::string& filepath) {
 	}
 
 }
-void DsoMapGenerator::saveDepthMaps(const std::string& filepath) {
+void DsoMapGenerator::saveDepthMaps(const string& filepath) {
+	string path(filepath.substr(0, filepath.rfind("/") + 1));
+	// create directory if it doesn't exist
+	boost::filesystem::path dir(path.c_str());
+	boost::filesystem::create_directories(dir);
+
+	for (auto const element : *depthImages) {
+		int id = element.first;
+		shared_ptr<MinimalImageF> depthMap = element.second;
+
+		stringstream filename_stream;
+		filename_stream << filepath << "_" << id << ".png";
+		IOWrap::writeImage(filename_stream.str(), depthMap.get());
+	}
+
+}
+void DsoMapGenerator::saveGroundTruth(const string& filename) {
+	// TODO
+	// it seems that DSO provides a file named "groundtruthSync.txt", but it
+	// only contains non-NaN values near the beginning and end of the sequence
+	// (the camera always starts and ends in the same lab). This seems super
+	// worthless without an end-to-end slam pipeline.
+}
+void DsoMapGenerator::saveRawImages(const string& filepath) {
+	string path(filepath.substr(0, filepath.rfind("/") + 1));
+	// create directory if it doesn't exist
+	boost::filesystem::path dir(path.c_str());
+	boost::filesystem::create_directories(dir);
+
+	for (auto const element : *rgbImages) {
+		int id = element.first;
+		shared_ptr<MinimalImageF> image = element.second;
+
+		stringstream filename_stream;
+		filename_stream << filepath << "_" << id << ".png";
+		IOWrap::writeImage(filename_stream.str(), image.get());
+	}
 }
 
 void DsoMapGenerator::parseArgument(char* arg) {
@@ -457,14 +571,13 @@ ArtificialMapGenerator::ArtificialMapGenerator() {
 }
 void ArtificialMapGenerator::runVisualOdometry() {
 }
-void ArtificialMapGenerator::savePointCloudAsPly(const std::string& filename) {
+void ArtificialMapGenerator::savePointCloudAsPly(const string& filename) {
 }
-void ArtificialMapGenerator::savePointCloudAsPcd(const std::string& filename) {
+void ArtificialMapGenerator::savePointCloudAsPcd(const string& filename) {
 }
-void ArtificialMapGenerator::savePointCloudAsManyPcds(
-		const std::string& filepath) {
+void ArtificialMapGenerator::savePointCloudAsManyPcds(const string& filepath) {
 }
-void ArtificialMapGenerator::saveDepthMaps(const std::string& filepath) {
+void ArtificialMapGenerator::saveDepthMaps(const string& filepath) {
 }
 
 }

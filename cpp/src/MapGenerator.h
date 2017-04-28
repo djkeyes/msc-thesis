@@ -7,6 +7,8 @@
 #include <list>
 
 #include "util/NumType.h"
+#include "util/DatasetReader.h"
+#include "util/MinimalImage.h"
 
 namespace sdl {
 
@@ -37,12 +39,27 @@ class DsoMapGenerator: public MapGenerator {
 public:
 
 	DsoMapGenerator(int argc, char** argv);
+	DsoMapGenerator(const std::string& input_path);
 
+	void initVisualOdometry();
+	void runVisualOdometry(const std::vector<int>& indices_to_play);
 	void runVisualOdometry() override;
+	inline bool hasValidPoints() const {
+		return !pointcloud->empty();
+	}
+
 	void savePointCloudAsPly(const std::string& filename) override;
 	void savePointCloudAsPcd(const std::string& filename) override;
 	void savePointCloudAsManyPcds(const std::string& filepath) override;
 	void saveDepthMaps(const std::string& filepath) override;
+
+	void saveGroundTruth(const std::string& filename);
+	void saveRawImages(const std::string& filepath);
+
+	inline ImageFolderReader& getReader() {
+		return *reader;
+	}
+
 private:
 	void parseArgument(char* arg);
 
@@ -58,7 +75,10 @@ private:
 			std::map<int,
 					std::pair<dso::SE3,
 							std::shared_ptr<std::list<ColoredPoint>>> > >pointcloudsWithViewpoints;
+	std::shared_ptr<std::map<int, std::shared_ptr<dso::MinimalImageF>>> depthImages;
+	std::shared_ptr<std::map<int, std::shared_ptr<dso::MinimalImageF>>> rgbImages;
 
+	std::shared_ptr<ImageFolderReader> reader;
 };
 
 class ArtificialMapGenerator: public MapGenerator {

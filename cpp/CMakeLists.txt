@@ -17,7 +17,7 @@ set(DSO_PATH "/home/daniel/git/dso")
 message("\n\n---- LOOKING FOR DSO at\n\"${DSO_PATH}\"")
 
 find_package(Eigen3 REQUIRED)
-find_package(Boost COMPONENTS system thread)
+find_package(Boost COMPONENTS system thread program_options)
 find_package(LibZip)
 find_package(OpenCV)
 find_library(DSO_LIBRARY dso ${DSO_PATH}/build/lib)
@@ -74,6 +74,24 @@ target_link_libraries(pfh_from_ply_test
     ${PCL_FEATURES_LIBRARIES}
 )
 
+
+add_executable(main_run_semidense
+    src/MapGenerator.h
+
+    src/main_run_semidense.cpp
+    src/MapGenerator.cpp
+)
+
+target_link_libraries(main_run_semidense
+    ${DSO_LIBRARY}
+    ${OpenCV_LIBS}
+    ${LIBZIP_LIBRARY}
+    boost_system
+    boost_thread
+    boost_program_options
+    ${PCL_COMMON_LIBRARIES}
+    ${PCL_IO_LIBRARIES}
+)
 
 
 
