@@ -69,9 +69,8 @@ int main(int argc, char** argv) {
 
 	string output_path = vm[OUTPUT_PATH_FLAG].as<string>();
 
-	int num_outputs = 0;
-
 	vector<string> input_paths = vm[INPUT_PATH_FLAG].as<vector<string>>();
+	int num_inputs_processed = 0;
 	for (const auto& input_path : input_paths) {
 		// TODO: use overlapping frames, but perturbed enough to produce
 		// different pointclouds. ideas: play backwards? drop frames? maybe
@@ -83,6 +82,10 @@ int main(int argc, char** argv) {
 		map_gen->initVisualOdometry();
 		int num_segments = max(1,
 				map_gen->getReader().getNumImages() / frames_per_segment);
+		stringstream trajectorydir;
+		trajectorydir << setfill('0');
+		trajectorydir << output_path << "/trajectory_" << setw(5)
+				<< num_inputs_processed++;
 		for (int segment = 0; segment < num_segments; segment++) {
 			vector<int> ids_to_play;
 			for (int i = 0; i < frames_per_segment; i++) {
@@ -101,20 +104,22 @@ int main(int argc, char** argv) {
 
 			if (map_gen->hasValidPoints()) {
 				stringstream ss;
-				ss << output_path << "/odom_" << setfill('0') << setw(5)
-						<< num_outputs++ << "/";
+				ss << setfill('0');
+				ss << trajectorydir.str() << "/segment_" << setw(5) << segment
+						<< "/";
 				map_gen->savePointCloudAsManyPcds(ss.str() + "cloud");
 				map_gen->saveDepthMaps(ss.str() + "depth");
-				map_gen->saveGroundTruth(ss.str() + "groundtruth.txt");
 				map_gen->saveRawImages(ss.str() + "raw");
-				// TODO: save
-				// 	-pointclouds, each point associated to a keyframe (done)
-				//  -depthmaps, per keyframe id
-				//  -raw images, per keyframe id
-				//  -ground truth pose and time, per keyframe id
-				//  -maybe also camera calibration? (intrinsics, and exposure per keyframe id)
+				// TODO: save camera calibration. or compute it once over the
+				// whole trajectory, then apply that to the short trajectories
 			}
 		}
+		// also run once on full trajectory
+		cout << "running visual odometry once on whole trajectory..." << endl;
+		map_gen->runVisualOdometry();
+
+		map_gen->savePosesInWorldFrame(input_path + "/groundtruthSync.txt",
+				trajectorydir.str() + "/poses.txt");
 	}
 
 	return 0;

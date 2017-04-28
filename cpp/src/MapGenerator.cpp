@@ -32,6 +32,7 @@ struct DsoOutputRecorder: public Output3DWrapper {
 	shared_ptr<map<int, pair<SE3, shared_ptr<list<ColoredPoint>>> > > pointsWithViewpointsById;
 	shared_ptr<map<int, shared_ptr<MinimalImageF>>> depthImagesById;
 	shared_ptr<map<int, shared_ptr<MinimalImageF>>> rgbImagesById;
+	shared_ptr<map<int, SE3*>> posesById;
 
 	const double my_scaledTH = 1; //1e10;
 	const double my_absTH = 1;//1e10;
@@ -41,7 +42,8 @@ struct DsoOutputRecorder: public Output3DWrapper {
 	coloredPoints(new list<ColoredPoint>()),
 	pointsWithViewpointsById(new map<int, pair<SE3, shared_ptr<list<ColoredPoint>>> >()),
 	depthImagesById(new map<int, shared_ptr<MinimalImageF>>()),
-	rgbImagesById(new map<int, shared_ptr<MinimalImageF>>()) {
+	rgbImagesById(new map<int, shared_ptr<MinimalImageF>>()),
+	posesById(new map<int, SE3*>()) {
 	}
 
 	void publishGraph(
@@ -153,7 +155,7 @@ struct DsoOutputRecorder: public Output3DWrapper {
 	}
 
 	void publishCamPose(FrameShell* frame, CalibHessian* HCalib) override {
-//		printf("publishCamPose() called!\n");
+		posesById->insert(make_pair(frame->incoming_id, &frame->camToWorld));
 	}
 
 	void pushLiveFrame(FrameHessian* image) override {
@@ -333,6 +335,7 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
 	pointcloudsWithViewpoints = dso_recorder->pointsWithViewpointsById;
 	depthImages = dso_recorder->depthImagesById;
 	rgbImages = dso_recorder->rgbImagesById;
+	poses = dso_recorder->posesById;
 
 	if (print_debug_info) {
 		printf("recorded %lu points!\n", pointcloud->size());
@@ -445,14 +448,69 @@ void DsoMapGenerator::saveDepthMaps(const string& filepath) {
 	}
 
 }
-void DsoMapGenerator::saveGroundTruth(const string& filename) {
-	// TODO
-	// it seems that DSO provides a file named "groundtruthSync.txt", but it
-	// only contains non-NaN values near the beginning and end of the sequence
-	// (the camera always starts and ends in the same lab). This seems super
-	// worthless without an end-to-end slam pipeline.
+void DsoMapGenerator::savePosesInWorldFrame(const string& gt_filename,
+		const string& output_filename) const {
+
+	ifstream ground_truth;
+	ground_truth.open(gt_filename);
+	int firstTrackedFrame = 0;
+	SE3 trajectory_to_world;
+
+	for (;; firstTrackedFrame++) {
+
+		double time;
+		double x, y, z;
+		double qx, qy, qz, qw;
+
+		// expecting format 'time x y z qx qy qz qw', where x thru qw can be NaN
+		string line, tmp;
+		getline(ground_truth, line);
+		stringstream ss(line);
+		ss >> time;
+		ss >> tmp;
+
+		// apparently operator>> can't parse the string "NaN" correctly
+		// skip if the current line has NaN, or we don't have a pose estimate.
+		if (tmp.find("NaN") != tmp.npos ||
+				poses->find(firstTrackedFrame) == poses->end()) {
+			continue;
+		}
+		ss >> y >> z >> qx >> qy >> qz >> qw;
+		ss = stringstream(tmp);
+		ss >> x;
+
+		Eigen::Quaternion<SE3::Scalar> orientation(qw, qx, qy, qz);
+		SE3::Point translation(x, y, z);
+
+		SE3 world_to_camera(orientation, translation);
+
+		trajectory_to_world = world_to_camera
+				* poses->at(firstTrackedFrame)->inverse();
+
+		break;
+	}
+
+	string path(output_filename.substr(0, output_filename.rfind("/") + 1));
+	// create directory if it doesn't exist
+	boost::filesystem::path dir(path.c_str());
+	boost::filesystem::create_directories(dir);
+
+	ofstream out;
+	out.open(output_filename, ios::out | ios::trunc);
+	for (const auto& element : *poses) {
+		int id = element.first;
+		SE3 pose = trajectory_to_world * (*element.second);
+
+		out << id << " " << pose.translation().x() << " "
+				<< pose.translation().y() << " " << pose.translation().z()
+				<< " " << pose.unit_quaternion().x() << " "
+				<< pose.unit_quaternion().y() << " "
+				<< pose.unit_quaternion().z() << " "
+				<< pose.unit_quaternion().w() << endl;
+	}
+	out.close();
 }
-void DsoMapGenerator::saveRawImages(const string& filepath) {
+void DsoMapGenerator::saveRawImages(const string& filepath) const {
 	string path(filepath.substr(0, filepath.rfind("/") + 1));
 	// create directory if it doesn't exist
 	boost::filesystem::path dir(path.c_str());

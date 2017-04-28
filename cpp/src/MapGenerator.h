@@ -53,8 +53,9 @@ public:
 	void savePointCloudAsManyPcds(const std::string& filepath) override;
 	void saveDepthMaps(const std::string& filepath) override;
 
-	void saveGroundTruth(const std::string& filename);
-	void saveRawImages(const std::string& filepath);
+	void saveRawImages(const std::string& filepath) const;
+	void savePosesInWorldFrame(const std::string& gt_filename, const std::string& output_filename) const;
+
 
 	inline ImageFolderReader& getReader() {
 		return *reader;
@@ -77,6 +78,7 @@ private:
 							std::shared_ptr<std::list<ColoredPoint>>> > >pointcloudsWithViewpoints;
 	std::shared_ptr<std::map<int, std::shared_ptr<dso::MinimalImageF>>> depthImages;
 	std::shared_ptr<std::map<int, std::shared_ptr<dso::MinimalImageF>>> rgbImages;
+	std::shared_ptr<std::map<int, dso::SE3*>> poses;
 
 	std::shared_ptr<ImageFolderReader> reader;
 };
