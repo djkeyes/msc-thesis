@@ -71,16 +71,16 @@ private:
 
 	int mode = 0;
 
-	std::shared_ptr<std::list<ColoredPoint>> pointcloud;
-	std::shared_ptr<
+	std::unique_ptr<std::list<ColoredPoint>> pointcloud;
+	std::unique_ptr<
 			std::map<int,
 					std::pair<dso::SE3,
-							std::shared_ptr<std::list<ColoredPoint>>> > >pointcloudsWithViewpoints;
-	std::shared_ptr<std::map<int, std::shared_ptr<dso::MinimalImageF>>> depthImages;
-	std::shared_ptr<std::map<int, std::shared_ptr<dso::MinimalImageF>>> rgbImages;
-	std::shared_ptr<std::map<int, dso::SE3*>> poses;
+							std::unique_ptr<std::list<ColoredPoint>>> > >pointcloudsWithViewpoints;
+	std::unique_ptr<std::map<int, std::unique_ptr<dso::MinimalImageF>>> depthImages;
+	std::unique_ptr<std::map<int, std::unique_ptr<dso::MinimalImageF>>> rgbImages;
+	std::unique_ptr<std::map<int, dso::SE3*>> poses;
 
-	std::shared_ptr<ImageFolderReader> reader;
+	std::unique_ptr<ImageFolderReader> reader;
 };
 
 class ArtificialMapGenerator: public MapGenerator {

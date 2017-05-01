@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
 		// simple using different start/end indices is sufficient?
 
 		int frames_per_segment = 300;
-		shared_ptr<DsoMapGenerator> map_gen(new DsoMapGenerator(input_path));
+		unique_ptr<DsoMapGenerator> map_gen(new DsoMapGenerator(input_path));
 
 		map_gen->initVisualOdometry();
 		int num_segments = max(1,
@@ -120,6 +120,10 @@ int main(int argc, char** argv) {
 
 		map_gen->savePosesInWorldFrame(input_path + "/groundtruthSync.txt",
 				trajectorydir.str() + "/poses.txt");
+
+		map_gen->savePointCloudAsManyPcds(input_path + "/full/cloud");
+		map_gen->saveDepthMaps(input_path + "/full/depth");
+		map_gen->saveRawImages(input_path + "/full/raw");
 	}
 
 	return 0;
