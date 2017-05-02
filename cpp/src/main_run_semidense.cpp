@@ -121,9 +121,9 @@ int main(int argc, char** argv) {
 		map_gen->savePosesInWorldFrame(input_path + "/groundtruthSync.txt",
 				trajectorydir.str() + "/poses.txt");
 
-		map_gen->savePointCloudAsManyPcds(input_path + "/full/cloud");
-		map_gen->saveDepthMaps(input_path + "/full/depth");
-		map_gen->saveRawImages(input_path + "/full/raw");
+		map_gen->savePointCloudAsManyPcds(trajectorydir.str() + "/full/cloud");
+		map_gen->saveDepthMaps(trajectorydir.str() + "/full/depth");
+		map_gen->saveRawImages(trajectorydir.str() + "/full/raw");
 	}
 
 	return 0;
