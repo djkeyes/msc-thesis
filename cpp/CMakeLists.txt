@@ -4,6 +4,7 @@ PROJECT(${PROJECT_NAME})
 CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
 
 set(BUILD_TYPE Release)
+#set(BUILD_TYPE RelWithDebugInfo)
 
 set(EXECUTABLE_OUTPUT_PATH bin)
 set(LIBRARY_OUTPUT_PATH lib)
@@ -17,7 +18,7 @@ set(DSO_PATH "/home/daniel/git/dso")
 message("\n\n---- LOOKING FOR DSO at\n\"${DSO_PATH}\"")
 
 find_package(Eigen3 REQUIRED)
-find_package(Boost COMPONENTS system thread program_options)
+find_package(Boost COMPONENTS system thread program_options filesystem)
 find_package(LibZip)
 find_package(OpenCV)
 find_library(DSO_LIBRARY dso ${DSO_PATH}/build/lib)
@@ -27,7 +28,7 @@ find_package(PCL REQUIRED COMPONENTS common io features)
 # march (and SSE?) flags are needed to prevent eigen from segfaulting. TODO: why?
 set(CMAKE_CXX_FLAGS
    #"${SSE_FLAGS} -std=c++14 -O2"
-   "${SSE_FLAGS} -O2 -std=c++14 -march=native -Wall"
+   "${SSE_FLAGS} -g -O3 -std=c++14 -march=native -Wall"
 )
 
 include_directories(
@@ -89,6 +90,20 @@ target_link_libraries(main_run_semidense
     boost_system
     boost_thread
     boost_program_options
+    ${PCL_COMMON_LIBRARIES}
+    ${PCL_IO_LIBRARIES}
+)
+
+
+
+add_executable(main_analyze_relocalization
+
+    src/main_analyze_relocalization.cpp
+)
+
+target_link_libraries(main_analyze_relocalization
+    ${OpenCV_LIBS}
+    boost_filesystem
     ${PCL_COMMON_LIBRARIES}
     ${PCL_IO_LIBRARIES}
 )
