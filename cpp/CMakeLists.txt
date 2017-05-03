@@ -22,7 +22,11 @@ find_package(LibZip)
 find_package(OpenCV)
 find_library(DSO_LIBRARY dso ${DSO_PATH}/build/lib)
 find_package(PCL REQUIRED COMPONENTS common io features)
-
+# fix unnecessary link required by libproj in ubuntu 16.04
+list(REMOVE_ITEM PCL_LIBRARIES "vtkproj4")
+list(REMOVE_ITEM PCL_COMMON_LIBRARIES "vtkproj4")
+list(REMOVE_ITEM PCL_IO_LIBRARIES "vtkproj4")
+list(REMOVE_ITEM PCL_FEATURES_LIBRARIES "vtkproj4")
 
 # march (and SSE?) flags are needed to prevent eigen from segfaulting. TODO: why?
 set(CMAKE_CXX_FLAGS
