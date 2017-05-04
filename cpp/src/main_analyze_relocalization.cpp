@@ -11,6 +11,7 @@
 #include "opencv2/xfeatures2d.hpp"
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/ml.hpp"
+//#include "opencv2/highgui.hpp"
 
 #include "boost/filesystem.hpp"
 
@@ -50,10 +51,11 @@ public:
 	}
 
 	void computeFeatures() {
-		// TODO a short sequence contains many keyframes. We should pick one from the middle or something.
-		// also the next line is going to throw an exception, because it refers to the parent directory, not to a file.
-		cout << "about to fail after opening " << dataDir.string() << endl;
-		colorImage = imread(dataDir.string());
+		// TODO a short sequence contains many keyframes. We should pick one
+		// from the middle or something. Or instead of computing many short
+		// sequences, we should just use the whole sequence (but only consider
+		// frames in a window around the current keyframe).
+		colorImage = imread(pickAnImage(dataDir.string()));
 		featureDetector->detect(colorImage, keypoints);
 	}
 	void setFeatureDetector(Ptr<FeatureDetector> feature_detector) {
@@ -73,6 +75,17 @@ private:
 	vector<KeyPoint> keypoints;
 
 	const fs::path dataDir;
+
+	string pickAnImage(const fs::path dir) {
+		// just pick any color image from the directory
+		for (auto file : fs::recursive_directory_iterator(dir)) {
+			if (file.path().filename().stem().string().find("raw")
+					!= string::npos) {
+				return file.path().string();
+			}
+		}
+		return "";
+	}
 };
 
 class Database {
@@ -86,17 +99,26 @@ public:
 		Mat bow;
 		// apparently compute() may modify the keypoints, because it invokes Feature2D.compute()
 		// therefore, store the result locally instead of caching them in the query.
-		vector<KeyPoint> keypoints;
-		bowExtractor->compute(query.getColorImage(), keypoints, bow);
+//		vector<KeyPoint> keypoints;
+//		bowExtractor->compute(query.getColorImage(), keypoints, bow);
 
-		vector<int> results;
-		classifier->predict(bow, results);
+		bowExtractor->compute(query.getColorImage(),
+				const_cast<vector<KeyPoint>&>(query.getKeypoints()), bow);
 
-		cout << "closest matching frames: ";
-		for (int r : results) {
-			cout << r << ", ";
-		}
-		cout << endl;
+		cout << "bow to test: " << bow << endl;
+
+//		Mat out;
+//		drawKeypoints(query.getColorImage(), query.getKeypoints(), out);
+//		namedWindow("Display window", WINDOW_AUTOSIZE);
+//		imshow("Display window", out);
+//		waitKey(0);
+
+		Mat results, neighborResponses, dist;
+		classifier->findNearest(bow, num_to_return, results, neighborResponses,
+				dist);
+		cout << "closest matching frames: " << results << endl;
+		cout << neighborResponses << endl; // only this contains the indices
+		cout << dist << endl;
 
 		// TODO
 		return vector<Result>();
@@ -129,16 +151,17 @@ public:
 		cout << "computing descriptors for each keyframe..." << endl;
 		// iterate through the images
 		map<int, Mat> colorImages;
+		map<int, vector<KeyPoint>> imageKeypoints;
 		for (const auto& element : *keyframes) {
 			const auto& keyframe = element.second;
 			colorImages[keyframe->index] = imread(keyframe->imagePath.string());
 
-			vector<KeyPoint> imageKeypoints;
+			imageKeypoints[keyframe->index] = vector<KeyPoint>();
 			featureDetector->detect(colorImages[keyframe->index],
-					imageKeypoints);
+					imageKeypoints[keyframe->index]);
 			Mat imageDescriptors;
 			descriptorExtractor->compute(colorImages[keyframe->index],
-					imageKeypoints, imageDescriptors);
+					imageKeypoints[keyframe->index], imageDescriptors);
 
 			if (!imageDescriptors.empty()) {
 				int descriptor_count = imageDescriptors.rows;
@@ -162,11 +185,11 @@ public:
 		for (const auto& element : *keyframes) {
 			const auto& keyframe = element.second;
 
-			vector<KeyPoint> imageKeypoints;
 			Mat bow;
-			bowExtractor->compute(colorImages[keyframe->index], imageKeypoints,
-					bow);
-			bow.copyTo(samples.row(row));
+			bowExtractor->compute(colorImages[keyframe->index],
+					imageKeypoints[keyframe->index], bow);
+			auto cur_row = samples.row(row);
+			bow.copyTo(cur_row);
 			labels.at<int>(row) = keyframe->index;
 
 			++row;
