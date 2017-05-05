@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
 				ids_to_play.push_back(segment * frames_per_segment + i);
 			}
 			if (segment == num_segments - 1) {
-				for (int i = segment * frames_per_segment;
+				for (int i = (segment + 1) * frames_per_segment;
 						i < map_gen->getReader().getNumImages(); i++) {
 					ids_to_play.push_back(i);
 				}
