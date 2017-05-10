@@ -11,7 +11,6 @@
 #include "opencv2/xfeatures2d.hpp"
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/ml.hpp"
-//#include "opencv2/highgui.hpp"
 
 #include "boost/filesystem.hpp"
 
@@ -21,10 +20,6 @@ using namespace std;
 using namespace cv;
 
 namespace sdl {
-
-struct Result {
-
-};
 
 struct Frame {
 	int index;
@@ -42,6 +37,14 @@ struct Frame {
 	void setPointcloudPath(fs::path path) {
 		pointcloudPath = path;
 	}
+};
+
+struct Result {
+	Result(Frame& frame) :
+			frame(frame) {
+	}
+
+	Frame& frame;
 };
 
 class Query {
@@ -105,23 +108,22 @@ public:
 		bowExtractor->compute(query.getColorImage(),
 				const_cast<vector<KeyPoint>&>(query.getKeypoints()), bow);
 
-		cout << "bow to test: " << bow << endl;
+		Mat neighborResponses;
+		classifier->findNearest(bow, num_to_return, noArray(),
+				neighborResponses, noArray());
 
-//		Mat out;
-//		drawKeypoints(query.getColorImage(), query.getKeypoints(), out);
-//		namedWindow("Display window", WINDOW_AUTOSIZE);
-//		imshow("Display window", out);
-//		waitKey(0);
+		vector<Result> results;
+		results.reserve(num_to_return);
+		for (int i = 0; i < num_to_return; i++) {
+			// KNearest casts labels to a float, despite the fact that we only ever passed it ints
+			int neighborIdx = static_cast<int>(neighborResponses.at<float>(i));
+			Frame& keyframe = *keyframes->at(neighborIdx);
+			Result cur_result(keyframe);
 
-		Mat results, neighborResponses, dist;
-		classifier->findNearest(bow, num_to_return, results, neighborResponses,
-				dist);
-		cout << "closest matching frames: " << results << endl;
-		cout << neighborResponses << endl; // only this contains the indices
-		cout << dist << endl;
+			results.push_back(cur_result);
+		}
 
-		// TODO
-		return vector<Result>();
+		return results;
 	}
 
 	void setFeatureDetector(Ptr<FeatureDetector> feature_detector) {
@@ -326,7 +328,17 @@ int main(int argc, char** argv) {
 
 			for (const sdl::Query& q : queries[j]) {
 				vector<sdl::Result> results = dbs[i].lookup(q, num_to_return);
+
+				// compute a homography for each result, then rank by number of inliers
+
+
 				// TODO: analyzer quality of results somehow
+
+				cout << "keyframes returned: ";
+				for (auto result : results) {
+					cout << result.frame.index << ", ";
+				}
+				cout << endl;
 			}
 
 		}
