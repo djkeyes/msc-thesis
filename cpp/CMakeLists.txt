@@ -3,8 +3,8 @@ SET(PROJECT_NAME MSC_THESIS)
 PROJECT(${PROJECT_NAME})
 CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
 
-set(BUILD_TYPE Release)
-#set(BUILD_TYPE RelWithDebugInfo)
+#set(BUILD_TYPE Release)
+set(BUILD_TYPE RelWithDebugInfo)
 
 set(EXECUTABLE_OUTPUT_PATH bin)
 set(LIBRARY_OUTPUT_PATH lib)
@@ -101,13 +101,16 @@ target_link_libraries(main_run_semidense
 
 
 add_executable(main_analyze_relocalization
-
+    src/Relocalization.h
+    
+    src/Relocalization.cpp
     src/main_analyze_relocalization.cpp
 )
 
 target_link_libraries(main_analyze_relocalization
     ${OpenCV_LIBS}
     boost_filesystem
+    boost_program_options
     ${PCL_COMMON_LIBRARIES}
     ${PCL_IO_LIBRARIES}
 )

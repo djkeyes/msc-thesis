@@ -1,305 +1,171 @@
+#include <algorithm>
+#include <exception>
+#include <fstream>
 #include <iostream>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
-#include <exception>
-#include <map>
-#include <algorithm>
-#include <memory>
-
-#include "opencv2/core/types.hpp"
-#include "opencv2/features2d.hpp"
-#include "opencv2/xfeatures2d.hpp"
-#include "opencv2/imgcodecs.hpp"
-#include "opencv2/ml.hpp"
 
 #include "boost/filesystem.hpp"
+#include "boost/program_options.hpp"
+#include "opencv2/xfeatures2d.hpp"
 
+#include "Relocalization.h"
+
+namespace po = boost::program_options;
 namespace fs = boost::filesystem;
 using namespace std;
-
+using namespace sdl;
 using namespace cv;
 
-namespace sdl {
-
-struct Frame {
-	int index;
-	fs::path depthmapPath, imagePath, pointcloudPath;
-	Frame(int index) :
-			index(index) {
-	}
-
-	void setDepthmapPath(fs::path path) {
-		depthmapPath = path;
-	}
-	void setImagePath(fs::path path) {
-		imagePath = path;
-	}
-	void setPointcloudPath(fs::path path) {
-		pointcloudPath = path;
-	}
-};
-
-struct Result {
-	Result(Frame& frame) :
-			frame(frame) {
-	}
-
-	Frame& frame;
-};
-
-class Query {
+class SceneParser {
 public:
-	Query(const fs::path dir) :
-			dataDir(dir) {
+	virtual ~SceneParser() {
 	}
 
-	void computeFeatures() {
-		// TODO a short sequence contains many keyframes. We should pick one
-		// from the middle or something. Or instead of computing many short
-		// sequences, we should just use the whole sequence (but only consider
-		// frames in a window around the current keyframe).
-		colorImage = imread(pickAnImage(dataDir.string()));
-		featureDetector->detect(colorImage, keypoints);
+	/*
+	 * Parse a scene into a set of databases and a set of queries (which may be built from overlapping data).
+	 */
+	virtual void parseScene(vector<sdl::Database>& dbs,
+			vector<sdl::Query>& queries) = 0;
+};
+class SevenScenesParser: public SceneParser {
+public:
+	SevenScenesParser(const fs::path& directory) :
+			directory(directory) {
 	}
-	void setFeatureDetector(Ptr<FeatureDetector> feature_detector) {
-		featureDetector = feature_detector;
+	virtual ~SevenScenesParser() {
 	}
-
-	const Mat& getColorImage() const {
-		return colorImage;
-	}
-	const vector<KeyPoint>& getKeypoints() const {
-		return keypoints;
-	}
-
-private:
-	Ptr<FeatureDetector> featureDetector;
-	Mat colorImage;
-	vector<KeyPoint> keypoints;
-
-	const fs::path dataDir;
-
-	string pickAnImage(const fs::path dir) {
-		// just pick any color image from the directory
-		for (auto file : fs::recursive_directory_iterator(dir)) {
-			if (file.path().filename().stem().string().find("raw")
-					!= string::npos) {
-				return file.path().string();
+	virtual void parseScene(vector<sdl::Database>& dbs,
+			vector<sdl::Query>& queries) {
+		vector<fs::path> sequences;
+		for (auto dir : fs::recursive_directory_iterator(directory)) {
+			if (!fs::is_directory(dir)) {
+				continue;
 			}
+			// each subdirectory should be of the form "seq-XX"
+			if (dir.path().filename().string().find("seq") != 0) {
+				continue;
+			}
+			sequences.push_back(dir);
 		}
-		return "";
-	}
-};
-
-class Database {
-public:
-	Database(const fs::path dir) :
-			dataDir(dir), keyframes(new map<int, unique_ptr<Frame>>()) {
-	}
-
-	vector<Result> lookup(const Query& query, int num_to_return) {
-
-		Mat bow;
-		// apparently compute() may modify the keypoints, because it invokes Feature2D.compute()
-		// therefore, store the result locally instead of caching them in the query.
-//		vector<KeyPoint> keypoints;
-//		bowExtractor->compute(query.getColorImage(), keypoints, bow);
-
-		bowExtractor->compute(query.getColorImage(),
-				const_cast<vector<KeyPoint>&>(query.getKeypoints()), bow);
-
-		Mat neighborResponses;
-		classifier->findNearest(bow, num_to_return, noArray(),
-				neighborResponses, noArray());
-
-		vector<Result> results;
-		results.reserve(num_to_return);
-		for (int i = 0; i < num_to_return; i++) {
-			// KNearest casts labels to a float, despite the fact that we only ever passed it ints
-			int neighborIdx = static_cast<int>(neighborResponses.at<float>(i));
-			Frame& keyframe = *keyframes->at(neighborIdx);
-			Result cur_result(keyframe);
-
-			results.push_back(cur_result);
+		if (sequences.empty()) {
+			throw std::runtime_error("scene contained no sequences!");
 		}
 
-		return results;
-	}
+		// each sequence can produce 1 database and several queries
+		for (const fs::path& sequence_dir : sequences) {
+			dbs.push_back(sdl::Database());
 
-	void setFeatureDetector(Ptr<FeatureDetector> feature_detector) {
-		featureDetector = feature_detector;
-	}
-
-	void setDescriptorExtractor(Ptr<DescriptorExtractor> descriptor_extractor) {
-		descriptorExtractor = descriptor_extractor;
-	}
-	void setBowExtractor(Ptr<BOWImgDescriptorExtractor> bow_extractor) {
-		bowExtractor = bow_extractor;
-	}
-
-	void train() {
-
-		readDirectoryContents();
-
-		/*vector<ObdImage> images;
-		 vector<char> objectPresent;
-		 vocData.getClassImages( trainParams.trainObjClass, CV_OBD_TRAIN, images, objectPresent );*/
-
-		TermCriteria terminate_criterion;
-		terminate_criterion.epsilon = FLT_EPSILON;
-		int vocab_size = 10;
-		BOWKMeansTrainer bow_trainer(vocab_size, terminate_criterion);
-
-		cout << "computing descriptors for each keyframe..." << endl;
-		// iterate through the images
-		map<int, Mat> colorImages;
-		map<int, vector<KeyPoint>> imageKeypoints;
-		for (const auto& element : *keyframes) {
-			const auto& keyframe = element.second;
-			colorImages[keyframe->index] = imread(keyframe->imagePath.string());
-
-			imageKeypoints[keyframe->index] = vector<KeyPoint>();
-			featureDetector->detect(colorImages[keyframe->index],
-					imageKeypoints[keyframe->index]);
-			Mat imageDescriptors;
-			descriptorExtractor->compute(colorImages[keyframe->index],
-					imageKeypoints[keyframe->index], imageDescriptors);
-
-			if (!imageDescriptors.empty()) {
-				int descriptor_count = imageDescriptors.rows;
-
-				for (int i = 0; i < descriptor_count; i++) {
-					bow_trainer.add(imageDescriptors.row(i));
+			Database& cur_db = dbs.back();
+			for (auto file : fs::recursive_directory_iterator(sequence_dir)) {
+				string name(file.path().filename().string());
+				if (name.find(".color.png") == string::npos) {
+					continue;
 				}
+				// these files are in the format frame-XXXXXX.color.png
+				int id = stoi(name.substr(6, 6));
+				unique_ptr<Frame> frame(new sdl::Frame(id));
+				frame->setImagePath(file);
+				Query q(&cur_db, frame.get());
+				queries.push_back(q);
+				cur_db.addFrame(move(frame));
 			}
 		}
-		cout << "computed " << bow_trainer.descriptorsCount() << " descriptors."
-				<< endl;
-
-		cout << "Training vocabulary..." << endl;
-		vocabulary = bow_trainer.cluster();
-		bowExtractor->setVocabulary(vocabulary);
-
-		// Create training data by converting each keyframe to a bag of words
-		Mat samples((int) keyframes->size(), vocabulary.rows, CV_32FC1);
-		Mat labels((int) keyframes->size(), 1, CV_32SC1);
-		int row = 0;
-		for (const auto& element : *keyframes) {
-			const auto& keyframe = element.second;
-
-			Mat bow;
-			bowExtractor->compute(colorImages[keyframe->index],
-					imageKeypoints[keyframe->index], bow);
-			auto cur_row = samples.row(row);
-			bow.copyTo(cur_row);
-			labels.at<int>(row) = keyframe->index;
-
-			++row;
-		}
-
-		classifier = ml::KNearest::create();
-		classifier->train(samples, ml::ROW_SAMPLE, labels);
-
 	}
+
 private:
-	const fs::path dataDir;
-
-	Ptr<DescriptorExtractor> descriptorExtractor;
-	Ptr<FeatureDetector> featureDetector;
-
-	Mat vocabulary;
-	Ptr<BOWImgDescriptorExtractor> bowExtractor;
-	Ptr<ml::KNearest> classifier;
-
-	unique_ptr<map<int, unique_ptr<Frame>>> keyframes;
-
-	void readDirectoryContents() {
-		for (const auto& file : fs::recursive_directory_iterator(dataDir)) {
-
-			String filename = file.path().filename().string();
-
-			unsigned int delim_idx = filename.find("_");
-			if (delim_idx == string::npos) {
-				throw runtime_error(
-						"unexpected filename while loading database frames! "
-						+ file.path().string());
-			}
-			string stemmed = file.path().filename().stem().string();
-			int framenum = stoi(stemmed.substr(delim_idx+1));
-			// only insert a new frame if we haven't seen it before
-			if (keyframes->find(framenum) == keyframes->end()) {
-				keyframes->insert(make_pair(framenum, unique_ptr<Frame>(new Frame(framenum))));
-			}
-
-			if (filename.find("cloud") == 0) {
-				// pointcloud
-				keyframes->at(framenum)->setPointcloudPath(file);
-			} else if (filename.find("depth") == 0) {
-				// depth map
-				keyframes->at(framenum)->setDepthmapPath(file);
-			} else if (filename.find("raw") == 0) {
-				// image
-				keyframes->at(framenum)->setImagePath(file);
-			} else {
-				throw runtime_error(
-						"unexpected filename while loading database frames! "
-						+ file.path().string());
-			}
-		}
-
-	}
+	fs::path directory;
 };
 
-void initDatabasesAndQueries(const string& directory, vector<Database>& dbs_out,
-		vector<vector<Query>>& queries_out) {
+unique_ptr<SceneParser> scene_parser;
 
-	if (!fs::exists(directory) || !fs::is_directory(directory)) {
-		cout << "directory " << directory << " does not exist" << endl;
-		exit(-1);
+void usage(char** argv, const po::options_description commandline_args) {
+	cout << "Usage: " << argv[0] << " [options]" << endl;
+	cout << commandline_args << "\n";
+}
+
+void parseArguments(int argc, char** argv) {
+	// Arguments, can be specified on commandline or in a file settings.config
+	po::options_description commandline_exclusive(
+			"Allowed options from terminal");
+	commandline_exclusive.add_options()
+			("help", "Print this help message.")
+			("config", po::value<string>(), "Path to a config file, which can specify any other argument.");
+
+	po::options_description general_args(
+			"Allowed options from terminal or config file");
+	general_args.add_options()
+			("scene", po::value<string>(), "Type of scene. Currently the only allowed type is 7scenes.")
+			("datadir", po::value<string>()->default_value(""), "Directory of the scene dataset. For datasets composed"
+					" of several scenes, this should be the appropriate subdirectory.")
+			("vocabulary_size", po::value<int>()->default_value(100000), "Size of the visual vocabulary.");
+
+	po::options_description commandline_args;
+	commandline_args.add(commandline_exclusive).add(general_args);
+
+	// check for config file
+	po::variables_map vm;
+	po::store(
+			po::command_line_parser(argc, argv).options(commandline_exclusive).allow_unregistered().run(),
+			vm);
+	po::notify(vm);
+
+	if (vm.count("help")) {
+		// print help and exit
+		usage(argv, commandline_args);
+		exit(0);
 	}
 
-	vector<fs::path> trajectory_paths;
-	copy(fs::directory_iterator(directory), fs::directory_iterator(),
-			back_inserter(trajectory_paths));
-	sort(trajectory_paths.begin(), trajectory_paths.end());
-
-	dbs_out.reserve(trajectory_paths.size());
-	queries_out.reserve(trajectory_paths.size());
-	for (const auto& trajectory_path : trajectory_paths) {
-
-		dbs_out.emplace_back(trajectory_path / "full");
-		vector<Query> curQueries;
-
-		fs::directory_iterator dir_end;
-		for (auto subdir = fs::directory_iterator(trajectory_path);
-				subdir != dir_end; ++subdir) {
-			if (!fs::is_directory(subdir->path())) {
-				continue;
-			}
-			if (subdir->path().filename().compare("full") == 0) {
-				continue;
-			}
-			curQueries.emplace_back(subdir->path());
+	if (vm.count("config")) {
+		ifstream ifs(vm["config"].as<string>());
+		if (!ifs) {
+			cout << "could not open config file " << vm["config"].as<string>()
+					<< endl;
+			exit(1);
 		}
+		vm.clear();
+		// since config is added last, commandline args have precedence over args in the config file.
+		po::store(
+				po::command_line_parser(argc, argv).options(commandline_args).run(),
+				vm);
+		po::store(po::parse_config_file(ifs, general_args), vm);
+	} else {
+		vm.clear();
+		po::store(
+				po::command_line_parser(argc, argv).options(commandline_args).run(),
+				vm);
+	}
+	po::notify(vm);
 
-		queries_out.push_back(curQueries);
+	if (vm.count("scene")) {
+
+		string scene_type(vm["scene"].as<string>());
+		// currently only one supported scene
+		if (scene_type.find("7scenes") == 0) {
+			fs::path directory(vm["datadir"].as<string>());
+			scene_parser = unique_ptr<SceneParser>(new SevenScenesParser(directory));
+		} else {
+			cout << "Invalid value for argument 'scene'." << endl;
+			usage(argv, commandline_args);
+			exit(1);
+		}
+	} else {
+		cout << "Argument 'scene' is required." << endl;
+		usage(argv, commandline_args);
+		exit(1);
 	}
 }
-}
-
 int main(int argc, char** argv) {
 
-	if (argc < 2) {
-		cout << "usage: " << argv[0] << " <dataset>" << endl;
-		cout << "<dataset> is the output directory of main_run_semidense"
-				<< endl;
-		return -1;
-	}
+	parseArguments(argc, argv);
 
 	string datadir(argv[1]);
 	vector<sdl::Database> dbs;
-	vector<vector<sdl::Query>> queries;
-	sdl::initDatabasesAndQueries(datadir, dbs, queries);
+	vector<sdl::Query> queries;
+
+	scene_parser->parseScene(dbs, queries);
 
 	Ptr<Feature2D> sift = xfeatures2d::SIFT::create();
 	Ptr<BOWImgDescriptorExtractor> bow_extractor = makePtr<
@@ -312,52 +178,47 @@ int main(int argc, char** argv) {
 		db.setBowExtractor(bow_extractor);
 		db.train();
 	}
-	for (vector<sdl::Query>& queryvec : queries) {
-		for (auto& query : queryvec) {
-			query.setFeatureDetector(sift);
-			query.computeFeatures();
-		}
+	for (sdl::Query& query : queries) {
+		query.setFeatureDetector(sift);
+		query.computeFeatures();
 	}
 
 	int num_to_return = 10;
 	for (unsigned int i = 0; i < dbs.size(); i++) {
 		for (unsigned int j = 0; j < queries.size(); j++) {
-			if (i == j) {
+			if (queries[j].parent_database == &dbs[i]) {
 				cout << "testing a query on its original sequence!" << endl;
 			}
 
-			for (const sdl::Query& q : queries[j]) {
-				vector<sdl::Result> results = dbs[i].lookup(q, num_to_return);
+			vector<sdl::Result> results = dbs[i].lookup(queries[j], num_to_return);
 
-				// compute a homography for each result, then rank by number of inliers
+			// compute a homography for each result, then rank by number of inliers
 
+			// TODO: analyzer quality of results somehow
 
-				// TODO: analyzer quality of results somehow
-
-				cout << "keyframes returned: ";
-				for (auto result : results) {
-					cout << result.frame.index << ", ";
-				}
-				cout << endl;
+			cout << "keyframes returned: ";
+			for (auto result : results) {
+				cout << result.frame.index << ", ";
 			}
-
+			cout << endl;
 		}
+
 	}
 
-	// TODO:
-	// -for each full run, compute some database info
-	// -for each partial run, compute descriptors (opencv has this
-	// "BOWImgDescriptorExtractor", but I guess we can't cache the output of
-	// that, since the bag of words differs for each dataset
-	// -for each (full run, partial run):
-	// 	   get best matches
-	//     count number of consensus elements
-	//     TODOTODO: figure out how to evaluate match score
-	// after this is in place, we can vary the following parameters:
-	// -classifier (SVM? NN? idk)
-	// -descriptor (SIFT? SURF? lots of stuff in opencv)
-	// -distance metric
-	// -score reweighting
+// TODO:
+// -for each full run, compute some database info
+// -for each partial run, compute descriptors (opencv has this
+// "BOWImgDescriptorExtractor", but I guess we can't cache the output of
+// that, since the bag of words differs for each dataset
+// -for each (full run, partial run):
+// 	   get best matches
+//     count number of consensus elements
+//     TODOTODO: figure out how to evaluate match score
+// after this is in place, we can vary the following parameters:
+// -classifier (SVM? NN? idk)
+// -descriptor (SIFT? SURF? lots of stuff in opencv)
+// -distance metric
+// -score reweighting
 
 	return 0;
 }
