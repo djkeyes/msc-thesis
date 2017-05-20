@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+
 #include "opencv2/features2d.hpp"
 #include "opencv2/ml.hpp"
 #include "boost/filesystem.hpp"
@@ -15,7 +16,8 @@
 namespace sdl {
 struct Frame {
 	int index;
-	boost::filesystem::path depthmapPath, imagePath, pointcloudPath;
+	boost::filesystem::path depthmapPath, imagePath, pointcloudPath, cachePath;
+
 	Frame(int index) :
 			index(index) {
 	}
@@ -29,6 +31,16 @@ struct Frame {
 	void setPointcloudPath(boost::filesystem::path path) {
 		pointcloudPath = path;
 	}
+	void setCachePath(boost::filesystem::path path) {
+		cachePath = path;
+	}
+
+	boost::filesystem::path getDescriptorFilename() const ;
+	bool loadDescriptors(std::vector<cv::KeyPoint>& keypointsOut,
+			cv::Mat& descriptorsOut) const;
+	void saveDescriptors(const std::vector<cv::KeyPoint>& keypoints,
+			const cv::Mat& descriptors) const;
+
 };
 
 struct Result {
@@ -66,13 +78,29 @@ public:
 
 	std::vector<Result> lookup(const Query& query, int num_to_return);
 
+	void setVocabularySize(int size) {
+		vocabulary_size = size;
+	}
 	void setFeatureDetector(cv::Ptr<cv::FeatureDetector> feature_detector);
 	void setDescriptorExtractor(
 			cv::Ptr<cv::DescriptorExtractor> descriptor_extractor);
 	void setBowExtractor(cv::Ptr<cv::BOWImgDescriptorExtractor> bow_extractor);
 	void train();
 
+	void setCachePath(boost::filesystem::path path) {
+		cachePath = path;
+	}
+
 private:
+
+	boost::filesystem::path getVocabularyFilename() const;
+	bool loadVocabulary(cv::Mat& vocabularyOut) const;
+	void saveVocabulary(const cv::Mat& vocabulary) const;
+
+	boost::filesystem::path cachePath;
+
+	int vocabulary_size;
+
 	cv::Ptr<cv::DescriptorExtractor> descriptorExtractor;
 	cv::Ptr<cv::FeatureDetector> featureDetector;
 

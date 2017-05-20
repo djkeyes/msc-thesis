@@ -59,6 +59,10 @@ public:
 			dbs.push_back(sdl::Database());
 
 			Database& cur_db = dbs.back();
+			if (!cache.empty()) {
+				cur_db.setCachePath(cache / sequence_dir.filename());
+			}
+
 			for (auto file : fs::recursive_directory_iterator(sequence_dir)) {
 				string name(file.path().filename().string());
 				if (name.find(".color.png") == string::npos) {
@@ -68,6 +72,10 @@ public:
 				int id = stoi(name.substr(6, 6));
 				unique_ptr<Frame> frame(new sdl::Frame(id));
 				frame->setImagePath(file);
+				if (!cache.empty()) {
+					frame->setCachePath(cache / sequence_dir.filename());
+				}
+
 				Query q(&cur_db, frame.get());
 				queries.push_back(q);
 				cur_db.addFrame(move(frame));
@@ -75,11 +83,17 @@ public:
 		}
 	}
 
+	void setCache(fs::path cache_dir){
+		cache = cache_dir;
+	}
+
 private:
 	fs::path directory;
+	fs::path cache;
 };
 
 unique_ptr<SceneParser> scene_parser;
+int vocabulary_size;
 
 void usage(char** argv, const po::options_description commandline_args) {
 	cout << "Usage: " << argv[0] << " [options]" << endl;
@@ -100,7 +114,9 @@ void parseArguments(int argc, char** argv) {
 			("scene", po::value<string>(), "Type of scene. Currently the only allowed type is 7scenes.")
 			("datadir", po::value<string>()->default_value(""), "Directory of the scene dataset. For datasets composed"
 					" of several scenes, this should be the appropriate subdirectory.")
-			("vocabulary_size", po::value<int>()->default_value(100000), "Size of the visual vocabulary.");
+			("vocabulary_size", po::value<int>()->default_value(100000), "Size of the visual vocabulary.")
+			("cache", po::value<string>()->default_value(""), "Directory to cache intermediate results, ie"
+					" descriptors or visual vocabulary, between runs.");
 
 	po::options_description commandline_args;
 	commandline_args.add(commandline_exclusive).add(general_args);
@@ -139,13 +155,24 @@ void parseArguments(int argc, char** argv) {
 	}
 	po::notify(vm);
 
+	fs::path cache_dir;
+	if(vm.count("cache")){
+		cache_dir = fs::path(vm["cache"].as<string>());
+	}
+
+	vocabulary_size = vm["vocabulary_size"].as<int>();
+
 	if (vm.count("scene")) {
 
 		string scene_type(vm["scene"].as<string>());
 		// currently only one supported scene
 		if (scene_type.find("7scenes") == 0) {
 			fs::path directory(vm["datadir"].as<string>());
-			scene_parser = unique_ptr<SceneParser>(new SevenScenesParser(directory));
+			SevenScenesParser* parser = new SevenScenesParser(directory);
+			if(!cache_dir.empty()){
+				parser->setCache(cache_dir);
+			}
+			scene_parser = unique_ptr<SceneParser>(parser);
 		} else {
 			cout << "Invalid value for argument 'scene'." << endl;
 			usage(argv, commandline_args);
@@ -173,6 +200,7 @@ int main(int argc, char** argv) {
 			DescriptorMatcher::create("BruteForce"));
 
 	for (auto& db : dbs) {
+		db.setVocabularySize(vocabulary_size);
 		db.setDescriptorExtractor(sift);
 		db.setFeatureDetector(sift);
 		db.setBowExtractor(bow_extractor);
