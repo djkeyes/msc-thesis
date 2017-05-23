@@ -6,14 +6,13 @@ CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
 #set(BUILD_TYPE Release)
 set(BUILD_TYPE RelWithDebugInfo)
 
-set(EXECUTABLE_OUTPUT_PATH bin)
-set(LIBRARY_OUTPUT_PATH lib)
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
-
 
 # uncomment the following line and comment line afterward if you want to pick up the environmental variable instead of hardcoding the path
 #set(DSO_PATH $ENV{DSO_PATH})
 set(DSO_PATH "/home/daniel/git/dso")
+
+enable_testing()
 
 message("\n\n---- LOOKING FOR DSO at\n\"${DSO_PATH}\"")
 
@@ -36,6 +35,7 @@ set(CMAKE_CXX_FLAGS
 )
 
 include_directories(
+    ${PROJECT_SOURCE_DIR}/src
     ${DSO_PATH}/src
     ${DSO_PATH}/thirdparty/Sophus
     ${EIGEN3_INCLUDE_DIR}
@@ -46,7 +46,6 @@ include_directories(
 if (LIBZIP_LIBRARY)
 	message("--- found ziplib (${LIBZIP_VERSION}), compiling with zip capability.")
 	add_definitions(-DHAS_ZIPLIB=1)
-	#include_directories( ${LIBZIP_INCLUDE_DIR_ZIP} ${LIBZIP_INCLUDE_DIR_ZIPCONF} ) 
 else()
 	message("--- not found ziplib (${LIBZIP_LIBRARY}), compiling without zip capability.")
 	set(LIBZIP_LIBRARY "")
@@ -99,10 +98,11 @@ target_link_libraries(main_run_semidense
 )
 
 
-
 add_executable(main_analyze_relocalization
     src/Relocalization.h
+    src/ApproxKMeans.h
     
+    src/ApproxKMeans.cpp
     src/Relocalization.cpp
     src/main_analyze_relocalization.cpp
 )
@@ -115,5 +115,16 @@ target_link_libraries(main_analyze_relocalization
     ${PCL_IO_LIBRARIES}
 )
 
+add_executable(test_approx_kmeans
+    src/ApproxKMeans.h
+    
+    src/ApproxKMeans.cpp
+    test/test_approx_kmeans.cpp
+)
+
+target_link_libraries(test_approx_kmeans
+    ${OpenCV_LIBS}
+)
+add_test(TestApproxKmeans test_approx_kmeans)
 
 

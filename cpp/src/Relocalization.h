@@ -99,7 +99,7 @@ private:
 
 	boost::filesystem::path cachePath;
 
-	int vocabulary_size;
+	int vocabulary_size = 100000;
 
 	cv::Ptr<cv::DescriptorExtractor> descriptorExtractor;
 	cv::Ptr<cv::FeatureDetector> featureDetector;

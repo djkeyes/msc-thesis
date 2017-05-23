@@ -10,6 +10,7 @@
 #include "opencv2/imgcodecs.hpp"
 
 #include "Relocalization.h"
+#include "ApproxKMeans.h"
 
 using namespace std;
 using namespace cv;
@@ -148,9 +149,9 @@ void Database::setBowExtractor(Ptr<BOWImgDescriptorExtractor> bow_extractor) {
 
 void Database::train() {
 
-	TermCriteria terminate_criterion;
-	terminate_criterion.maxCount = 10;
-	BOWKMeansTrainer bow_trainer(vocabulary_size, terminate_criterion);
+	int max_iters = 10;
+	TermCriteria terminate_criterion(TermCriteria::MAX_ITER, max_iters, 0.0);
+	BOWApproxKMeansTrainer bow_trainer(vocabulary_size, terminate_criterion);
 
 	cout << "computing descriptors for each keyframe..." << endl;
 	// iterate through the images
@@ -192,7 +193,9 @@ void Database::train() {
 		saveVocabulary(vocabulary);
 	}
 	bowExtractor->setVocabulary(vocabulary);
+	cout << "Finished training vocabulary." << endl;
 
+	cout << "Computing bow descriptors for each image in training set..." << endl;
 	// Create training data by converting each keyframe to a bag of words
 	Mat samples((int) frames->size(), vocabulary.rows, CV_32FC1);
 	Mat labels((int) frames->size(), 1, CV_32SC1);
