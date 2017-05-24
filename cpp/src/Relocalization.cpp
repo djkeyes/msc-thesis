@@ -8,9 +8,9 @@
 
 #include "opencv2/core/types.hpp"
 #include "opencv2/imgcodecs.hpp"
+#include "geometricburstiness/inverted_index.h"
 
 #include "Relocalization.h"
-
 #include "LargeBagOfWords.h"
 
 using namespace std;
@@ -210,6 +210,8 @@ void Database::train() {
 		}
 		cout << endl;*/
 	}
+
+	geometric_burstiness::InvertedIndex<64> index;
 
 }
 

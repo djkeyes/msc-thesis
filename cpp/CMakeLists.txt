@@ -22,6 +22,8 @@ find_package(LibZip)
 find_package(OpenCV)
 find_library(DSO_LIBRARY dso ${DSO_PATH}/build/lib)
 find_package(PCL REQUIRED COMPONENTS common io features)
+find_package(GeometricBurstiness CONFIG REQUIRED) # this exports GeometricBurstinessHeaders
+
 # fix unnecessary link required by libproj in ubuntu 16.04
 list(REMOVE_ITEM PCL_LIBRARIES "vtkproj4")
 list(REMOVE_ITEM PCL_COMMON_LIBRARIES "vtkproj4")
@@ -113,6 +115,7 @@ target_link_libraries(main_analyze_relocalization
     boost_program_options
     ${PCL_COMMON_LIBRARIES}
     ${PCL_IO_LIBRARIES}
+    GeometricBurstinessHeaders
 )
 
 add_executable(test_approx_kmeans
