@@ -195,15 +195,14 @@ int main(int argc, char** argv) {
 	scene_parser->parseScene(dbs, queries);
 
 	Ptr<Feature2D> sift = xfeatures2d::SIFT::create();
-	Ptr<BOWImgDescriptorExtractor> bow_extractor = makePtr<
-			BOWImgDescriptorExtractor>(sift,
-			DescriptorMatcher::create("BruteForce"));
 
 	for (auto& db : dbs) {
 		db.setVocabularySize(vocabulary_size);
 		db.setDescriptorExtractor(sift);
 		db.setFeatureDetector(sift);
-		db.setBowExtractor(bow_extractor);
+		db.setBowExtractor(
+				makePtr<BOWSparseImgDescriptorExtractor>(sift,
+						FlannBasedMatcher::create()));
 		db.train();
 	}
 	for (sdl::Query& query : queries) {

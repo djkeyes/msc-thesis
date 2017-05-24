@@ -100,9 +100,9 @@ target_link_libraries(main_run_semidense
 
 add_executable(main_analyze_relocalization
     src/Relocalization.h
-    src/ApproxKMeans.h
+    src/LargeBagOfWords.h
     
-    src/ApproxKMeans.cpp
+    src/LargeBagOfWords.cpp
     src/Relocalization.cpp
     src/main_analyze_relocalization.cpp
 )
@@ -116,9 +116,9 @@ target_link_libraries(main_analyze_relocalization
 )
 
 add_executable(test_approx_kmeans
-    src/ApproxKMeans.h
+    src/LargeBagOfWords.h
     
-    src/ApproxKMeans.cpp
+    src/LargeBagOfWords.cpp
     test/test_approx_kmeans.cpp
 )
 

@@ -10,7 +10,8 @@
 #include "opencv2/imgcodecs.hpp"
 
 #include "Relocalization.h"
-#include "ApproxKMeans.h"
+
+#include "LargeBagOfWords.h"
 
 using namespace std;
 using namespace cv;
@@ -118,8 +119,6 @@ vector<Result> Database::lookup(const Query& query, int num_to_return) {
 			const_cast<vector<KeyPoint>&>(query.getKeypoints()), bow);
 
 	Mat neighborResponses;
-	classifier->findNearest(bow, num_to_return, noArray(), neighborResponses,
-			noArray());
 
 	vector<Result> results;
 	results.reserve(num_to_return);
@@ -143,7 +142,7 @@ void Database::setDescriptorExtractor(
 		Ptr<DescriptorExtractor> descriptor_extractor) {
 	descriptorExtractor = descriptor_extractor;
 }
-void Database::setBowExtractor(Ptr<BOWImgDescriptorExtractor> bow_extractor) {
+void Database::setBowExtractor(Ptr<BOWSparseImgDescriptorExtractor> bow_extractor) {
 	bowExtractor = bow_extractor;
 }
 
@@ -197,23 +196,20 @@ void Database::train() {
 
 	cout << "Computing bow descriptors for each image in training set..." << endl;
 	// Create training data by converting each keyframe to a bag of words
-	Mat samples((int) frames->size(), vocabulary.rows, CV_32FC1);
-	Mat labels((int) frames->size(), 1, CV_32SC1);
-	int row = 0;
+
+	int dims[] = { static_cast<int>(frames->size()), vocabulary.rows };
+	SparseMat samples(2, dims, CV_32FC1);
 	for (const auto& element : *frames) {
 		const auto& frame = element.second;
 
-		Mat bow;
-		bowExtractor->compute(imageDescriptors[frame->index], bow);
-		auto cur_row = samples.row(row);
-		bow.copyTo(cur_row);
-		labels.at<int>(row) = frame->index;
-
-		++row;
+		SparseMat bow;
+		bowExtractor->computeSparse(imageDescriptors[frame->index], bow);
+		/*cout << "sparse representation of frame " << frame->index << ": ";
+		for (auto iter = bow.begin<float>(); iter != bow.end<float>(); ++iter) {
+			cout << "(" << iter.node()->idx[0] << ": " << *iter << "), ";
+		}
+		cout << endl;*/
 	}
-
-	classifier = ml::KNearest::create();
-	classifier->train(samples, ml::ROW_SAMPLE, labels);
 
 }
 

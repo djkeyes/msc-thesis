@@ -1,5 +1,5 @@
-#ifndef SRC_APPROXKMEANS_H_
-#define SRC_APPROXKMEANS_H_
+#ifndef SRC_LARGEBAGOFWORDS_H_
+#define SRC_LARGEBAGOFWORDS_H_
 
 #include "opencv2/features2d.hpp"
 
@@ -22,6 +22,24 @@ public:
 	CV_WRAP virtual Mat cluster() const;
 	CV_WRAP	virtual Mat cluster(const Mat& descriptors) const;
 };
+
+class CV_EXPORTS_W BOWSparseImgDescriptorExtractor : public BOWImgDescriptorExtractor{
+
+public:
+    CV_WRAP BOWSparseImgDescriptorExtractor( const Ptr<DescriptorExtractor>& dextractor,
+                               const Ptr<DescriptorMatcher>& dmatcher );
+    virtual ~BOWSparseImgDescriptorExtractor();
+
+
+    /*
+	 * Compute a bag of words descriptor, and return it as a sparse array. For
+	 * a visual vocabulary of K words and images with N descriptors, this is
+	 * efficient when N << K.
+	 */
+	void computeSparse(InputArray keypointDescriptors,
+			SparseMat& imgDescriptorOut);
+};
+
 }
 
-#endif /* SRC_APPROXKMEANS_H_ */
+#endif /* SRC_LARGEBAGOFWORDS_H_ */

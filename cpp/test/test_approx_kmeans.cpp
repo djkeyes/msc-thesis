@@ -1,7 +1,7 @@
 
 #include <iostream>
 
-#include "ApproxKMeans.h"
+#include "LargeBagOfWords.h"
 
 using namespace cv;
 using namespace std;

@@ -8,10 +8,11 @@
 #include <string>
 #include <vector>
 
-
 #include "opencv2/features2d.hpp"
 #include "opencv2/ml.hpp"
 #include "boost/filesystem.hpp"
+
+#include "LargeBagOfWords.h"
 
 namespace sdl {
 struct Frame {
@@ -84,7 +85,7 @@ public:
 	void setFeatureDetector(cv::Ptr<cv::FeatureDetector> feature_detector);
 	void setDescriptorExtractor(
 			cv::Ptr<cv::DescriptorExtractor> descriptor_extractor);
-	void setBowExtractor(cv::Ptr<cv::BOWImgDescriptorExtractor> bow_extractor);
+	void setBowExtractor(cv::Ptr<cv::BOWSparseImgDescriptorExtractor> bow_extractor);
 	void train();
 
 	void setCachePath(boost::filesystem::path path) {
@@ -105,8 +106,7 @@ private:
 	cv::Ptr<cv::FeatureDetector> featureDetector;
 
 	cv::Mat vocabulary;
-	cv::Ptr<cv::BOWImgDescriptorExtractor> bowExtractor;
-	cv::Ptr<cv::ml::KNearest> classifier;
+	cv::Ptr<cv::BOWSparseImgDescriptorExtractor> bowExtractor;
 
 	std::unique_ptr<std::map<int, std::unique_ptr<Frame>>> frames;
 

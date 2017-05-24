@@ -4,7 +4,8 @@
 #include <map>
 
 #include "opencv2/flann/miniflann.hpp"
-#include "ApproxKMeans.h"
+
+#include "LargeBagOfWords.h"
 
 namespace cv {
 
@@ -326,32 +327,62 @@ double approx_kmeans(InputArray _data, int K, InputOutputArray _bestLabels,
 	return best_compactness;
 }
 
-BOWApproxKMeansTrainer::BOWApproxKMeansTrainer( int _clusterCount, const TermCriteria& _termcrit,
-                                    int _attempts, int _flags ) : BOWKMeansTrainer(_clusterCount, _termcrit, _attempts, _flags)
-{}
-
-Mat BOWApproxKMeansTrainer::cluster() const
-{
-    CV_Assert( !descriptors.empty() );
-
-    Mat mergedDescriptors( descriptorsCount(), descriptors[0].cols, descriptors[0].type() );
-    for( size_t i = 0, start = 0; i < descriptors.size(); i++ )
-    {
-        Mat submut = mergedDescriptors.rowRange((int)start, (int)(start + descriptors[i].rows));
-        descriptors[i].copyTo(submut);
-        start += descriptors[i].rows;
-    }
-    return cluster( mergedDescriptors );
+BOWApproxKMeansTrainer::BOWApproxKMeansTrainer(int _clusterCount,
+		const TermCriteria& _termcrit, int _attempts, int _flags) :
+		BOWKMeansTrainer(_clusterCount, _termcrit, _attempts, _flags) {
 }
 
-BOWApproxKMeansTrainer::~BOWApproxKMeansTrainer()
-{}
+Mat BOWApproxKMeansTrainer::cluster() const {
+	CV_Assert(!descriptors.empty());
 
-Mat BOWApproxKMeansTrainer::cluster( const Mat& _descriptors ) const
-{
-    Mat labels, vocabulary;
-    approx_kmeans( _descriptors, clusterCount, labels, termcrit, attempts, flags, vocabulary );
-    return vocabulary;
+	Mat mergedDescriptors(descriptorsCount(), descriptors[0].cols,
+			descriptors[0].type());
+	for (size_t i = 0, start = 0; i < descriptors.size(); i++) {
+		Mat submut = mergedDescriptors.rowRange((int) start,
+				(int) (start + descriptors[i].rows));
+		descriptors[i].copyTo(submut);
+		start += descriptors[i].rows;
+	}
+	return cluster(mergedDescriptors);
+}
+
+BOWApproxKMeansTrainer::~BOWApproxKMeansTrainer() {
+}
+
+Mat BOWApproxKMeansTrainer::cluster(const Mat& _descriptors) const {
+	Mat labels, vocabulary;
+	approx_kmeans(_descriptors, clusterCount, labels, termcrit, attempts, flags,
+			vocabulary);
+	return vocabulary;
+}
+
+CV_WRAP BOWSparseImgDescriptorExtractor::BOWSparseImgDescriptorExtractor(
+		const Ptr<DescriptorExtractor>& dextractor,
+		const Ptr<DescriptorMatcher>& dmatcher) : BOWImgDescriptorExtractor(dextractor, dmatcher) {
+}
+BOWSparseImgDescriptorExtractor::~BOWSparseImgDescriptorExtractor() {
+}
+
+void BOWSparseImgDescriptorExtractor::computeSparse(
+		InputArray keypointDescriptors, SparseMat& imgDescriptorOut) {
+
+	CV_Assert(!vocabulary.empty());
+
+	int cluster_count = descriptorSize(); // = vocabulary.rows
+
+	// Match keypoint descriptors to cluster center (to vocabulary)
+	std::vector<DMatch> matches;
+	dmatcher->match(keypointDescriptors, matches);
+
+	imgDescriptorOut.create(1, &cluster_count, descriptorType());
+
+	for (size_t i = 0; i < matches.size(); i++) {
+		int queryIdx = matches[i].queryIdx;
+		int trainIdx = matches[i].trainIdx;
+		CV_Assert(queryIdx == (int )i);
+
+		imgDescriptorOut.ref<float>(trainIdx) += 1.0f;
+	}
 }
 
 }
