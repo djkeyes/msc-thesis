@@ -363,25 +363,23 @@ CV_WRAP BOWSparseImgDescriptorExtractor::BOWSparseImgDescriptorExtractor(
 BOWSparseImgDescriptorExtractor::~BOWSparseImgDescriptorExtractor() {
 }
 
-void BOWSparseImgDescriptorExtractor::computeSparse(
-		InputArray keypointDescriptors, SparseMat& imgDescriptorOut) {
+void BOWSparseImgDescriptorExtractor::computeAssignments(
+		InputArray keypointDescriptors, std::vector<int>& assignmentsOut) {
 
 	CV_Assert(!vocabulary.empty());
-
-	int cluster_count = descriptorSize(); // = vocabulary.rows
 
 	// Match keypoint descriptors to cluster center (to vocabulary)
 	std::vector<DMatch> matches;
 	dmatcher->match(keypointDescriptors, matches);
 
-	imgDescriptorOut.create(1, &cluster_count, descriptorType());
+	assignmentsOut.reserve(matches.size());
 
 	for (size_t i = 0; i < matches.size(); i++) {
 		int queryIdx = matches[i].queryIdx;
 		int trainIdx = matches[i].trainIdx;
 		CV_Assert(queryIdx == (int )i);
 
-		imgDescriptorOut.ref<float>(trainIdx) += 1.0f;
+		assignmentsOut.push_back(trainIdx);
 	}
 }
 

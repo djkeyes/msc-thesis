@@ -32,12 +32,12 @@ public:
 
 
     /*
-	 * Compute a bag of words descriptor, and return it as a sparse array. For
-	 * a visual vocabulary of K words and images with N descriptors, this is
-	 * efficient when N << K.
+	 * Compute a bag of words descriptor, and return it as a collection of
+	 * nearest neighbor assignments. For a visual vocabulary of K words and
+	 * images with N descriptors, this is efficient when N << K.
 	 */
-	void computeSparse(InputArray keypointDescriptors,
-			SparseMat& imgDescriptorOut);
+	void computeAssignments(InputArray keypointDescriptors,
+			std::vector<int>& assignmentsOut);
 };
 
 }
