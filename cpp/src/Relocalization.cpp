@@ -105,9 +105,19 @@ void Frame::saveDescriptors(const vector<KeyPoint>& keypoints,
 	ofs.close();
 }
 
+
+struct Database::InvertedIndexImpl {
+	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+	geometric_burstiness::InvertedIndex<64> invertedIndex;
+};
+
 Database::Database() :
-		frames(new map<int, unique_ptr<Frame>>()) {
+		frames(new map<int, unique_ptr<Frame>>()), pInvertedIndexImpl(new Database::InvertedIndexImpl()) {
 }
+// Need to explicitly define destructor and move constructor, otherwise
+// compiler can't handle unique_ptrs with forward-declared types.
+Database::Database(Database&&) = default;
+Database::~Database() = default;
 
 vector<Result> Database::lookup(const Query& query, int num_to_return) {
 
@@ -333,19 +343,49 @@ MatrixXf Database::computeHammingThresholds(const MatrixXf& projection_matrix,
 
 	return hamming_thresholds;
 }
+fs::path Database::getInvertedIndexFilename() const {
+	return cachePath / "invertedIndex.bin";
+}
+bool Database::loadInvertedIndex(InvertedIndexImpl& inverted_index_impl) const {
+	if (cachePath.empty()) {
+		return false;
+	}
+
+	fs::path filename(getInvertedIndexFilename());
+
+	if (!fs::exists(filename)) {
+		return false;
+	}
+
+	return inverted_index_impl.invertedIndex.LoadInvertedIndex(
+			filename.string());
+}
+void Database::saveInvertedIndex(
+		const InvertedIndexImpl& inverted_index_impl) const {
+	if (cachePath.empty()) {
+		return;
+	}
+
+	fs::path filename(getInvertedIndexFilename());
+
+	inverted_index_impl.invertedIndex.SaveInvertedIndex(filename.string());
+}
+
 void Database::buildInvertedIndex(
 		const map<int, vector<KeyPoint>>& image_keypoints,
 		const map<int, Mat>& image_descriptors,
 		const map<int, vector<int>> descriptor_assignments) {
 
-	// TODO: load an index if it exists, and cache a copy if it didn't exist. We might also need to save the random projection, not sure if InvertedIndex saves that by default.
+	if (loadInvertedIndex(*pInvertedIndexImpl)) {
+		return;
+	}
 
 	MatrixXf projection_matrix = generateRandomProjection(
 			descriptorExtractor->descriptorSize(), 64);
 	MatrixXf hamming_thresholds = computeHammingThresholds(projection_matrix,
 			image_descriptors, descriptor_assignments);
 
-	geometric_burstiness::InvertedIndex<64> inverted_index;
+	geometric_burstiness::InvertedIndex<64> inverted_index = pInvertedIndexImpl->invertedIndex;
 	cout << "initializing index" << endl;
 	inverted_index.InitializeIndex(vocabulary_size);
 	cout << "finished initialization" << endl;
@@ -399,6 +439,8 @@ void Database::buildInvertedIndex(
 
 	inverted_index.FinalizeIndex();
 	cout << " Inverted index finalized" << endl;
+
+	saveInvertedIndex(*pInvertedIndexImpl);
 
 }
 void Database::train() {

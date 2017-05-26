@@ -76,6 +76,9 @@ private:
 class Database {
 public:
 	Database();
+	Database(Database&&);
+	~Database();
+
 	void addFrame(std::unique_ptr<Frame> frame);
 
 	std::vector<Result> lookup(const Query& query, int num_to_return);
@@ -110,6 +113,10 @@ private:
 	Eigen::MatrixXf computeHammingThresholds(const Eigen::MatrixXf& projection_matrix,
 			const std::map<int, cv::Mat>& image_descriptors,
 			const std::map<int, std::vector<int>> descriptor_assignments);
+	struct InvertedIndexImpl;
+	boost::filesystem::path getInvertedIndexFilename() const;
+	bool loadInvertedIndex(InvertedIndexImpl& inverted_index_impl) const;
+	void saveInvertedIndex(const InvertedIndexImpl& inverted_index_impl) const;
 	void buildInvertedIndex(
 			const std::map<int, std::vector<cv::KeyPoint>>& image_keypoints,
 			const std::map<int, cv::Mat>& image_descriptors,
@@ -127,6 +134,7 @@ private:
 
 	std::unique_ptr<std::map<int, std::unique_ptr<Frame>>>frames;
 
+	std::unique_ptr<InvertedIndexImpl> pInvertedIndexImpl;
 };
 
 }

@@ -56,7 +56,7 @@ public:
 
 		// each sequence can produce 1 database and several queries
 		for (const fs::path& sequence_dir : sequences) {
-			dbs.push_back(sdl::Database());
+			dbs.emplace_back();
 
 			Database& cur_db = dbs.back();
 			if (!cache.empty()) {
