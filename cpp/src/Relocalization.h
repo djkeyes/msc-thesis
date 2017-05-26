@@ -51,6 +51,7 @@ struct Result {
 	}
 
 	Frame& frame;
+	std::vector<cv::DMatch> matches;
 };
 
 class Database;
@@ -61,15 +62,20 @@ public:
 
 	void computeFeatures();
 	void setFeatureDetector(cv::Ptr<cv::FeatureDetector> feature_detector);
-	const cv::Mat& getColorImage() const;
+	void setDescriptorExtractor(cv::Ptr<cv::DescriptorExtractor> descriptor_extractor);
+	const cv::Mat readColorImage() const;
 	const std::vector<cv::KeyPoint>& getKeypoints() const;
+	const cv::Mat& getDescriptors() const;
 
 	const Database * const parent_database;
 private:
+
 	const Frame * const frame;
 
 	cv::Ptr<cv::FeatureDetector> featureDetector;
+	cv::Ptr<cv::DescriptorExtractor> descriptorExtractor;
 	std::vector<cv::KeyPoint> keypoints;
+	cv::Mat descriptors;
 
 };
 
@@ -81,7 +87,7 @@ public:
 
 	void addFrame(std::unique_ptr<Frame> frame);
 
-	std::vector<Result> lookup(const Query& query, int num_to_return);
+	std::vector<Result> lookup(const Query& query, unsigned int num_to_return);
 
 	void setVocabularySize(int size) {
 		vocabulary_size = size;
@@ -115,12 +121,12 @@ private:
 			const std::map<int, std::vector<int>> descriptor_assignments);
 	struct InvertedIndexImpl;
 	boost::filesystem::path getInvertedIndexFilename() const;
+	boost::filesystem::path getInvertedIndexWeightsFilename() const;
 	bool loadInvertedIndex(InvertedIndexImpl& inverted_index_impl) const;
 	void saveInvertedIndex(const InvertedIndexImpl& inverted_index_impl) const;
 	void buildInvertedIndex(
 			const std::map<int, std::vector<cv::KeyPoint>>& image_keypoints,
-			const std::map<int, cv::Mat>& image_descriptors,
-			const std::map<int, std::vector<int>> descriptor_assignments);
+			const std::map<int, cv::Mat>& image_descriptors);
 
 	boost::filesystem::path cachePath;
 

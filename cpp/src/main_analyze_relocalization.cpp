@@ -10,6 +10,8 @@
 #include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
 #include "opencv2/xfeatures2d.hpp"
+#include "opencv2/highgui.hpp"
+#include "opencv2/imgproc.hpp"
 
 #include "Relocalization.h"
 
@@ -18,6 +20,8 @@ namespace fs = boost::filesystem;
 using namespace std;
 using namespace sdl;
 using namespace cv;
+
+bool display_top_matching_images = true;
 
 class SceneParser {
 public:
@@ -198,8 +202,8 @@ int main(int argc, char** argv) {
 
 	for (auto& db : dbs) {
 		db.setVocabularySize(vocabulary_size);
-		db.setDescriptorExtractor(sift);
 		db.setFeatureDetector(sift);
+		db.setDescriptorExtractor(sift);
 		db.setBowExtractor(
 				makePtr<BOWSparseImgDescriptorExtractor>(sift,
 						FlannBasedMatcher::create()));
@@ -207,10 +211,11 @@ int main(int argc, char** argv) {
 	}
 	for (sdl::Query& query : queries) {
 		query.setFeatureDetector(sift);
+		query.setDescriptorExtractor(sift);
 		query.computeFeatures();
 	}
 
-	int num_to_return = 10;
+	int num_to_return = 8;
 	for (unsigned int i = 0; i < dbs.size(); i++) {
 		for (unsigned int j = 0; j < queries.size(); j++) {
 			if (queries[j].parent_database == &dbs[i]) {
@@ -223,11 +228,61 @@ int main(int argc, char** argv) {
 
 			// TODO: analyzer quality of results somehow
 
-			cout << "keyframes returned: ";
-			for (auto result : results) {
-				cout << result.frame.index << ", ";
+			// display the result in a pretty window
+			if (j < 5 && display_top_matching_images) {
+
+				int width = 640, height = 640;
+				int rows = 3, cols = 3;
+				int bordersize = 3;
+				Mat grid(height, width, CV_8UC3);
+				rectangle(grid, Point(0, 0), Point(width, height),
+						Scalar(255, 255, 255), FILLED, LINE_8);
+				rectangle(grid, Point(0, 0), Point(width / cols, height / rows),
+						Scalar(0, 0, 255), FILLED, LINE_8);
+
+				for (int c = 0; c < cols; ++c) {
+					for (int r = 0; r < rows; ++r) {
+						Point start(bordersize + c * width / cols,
+								bordersize + r * height / rows);
+						Point end((c + 1) * width / cols - bordersize,
+								(r + 1) * height / rows - bordersize);
+						int tilewidth = end.x - start.x;
+						int tileheight = end.y - start.y;
+
+						Mat image;
+						string text;
+						if (r == 0 && c == 0) {
+							// load query
+							image = queries[j].readColorImage();
+							text = "query";
+						} else {
+							// load db match
+							int index = cols * r + c - 1;
+							image = imread(
+									results[index].frame.imagePath.string());
+							stringstream ss;
+							ss << "rank=" << index;
+							text = ss.str();
+						}
+						resize(image, image, Size(tilewidth, tileheight));
+						putText(image, text, Point(tilewidth / 2 - 30, 15),
+								FONT_HERSHEY_PLAIN, 0.9, Scalar(255, 255, 255));
+						image.copyTo(
+								grid(Rect(start.x, start.y, tilewidth, tileheight)));
+					}
+				}
+				string window_name("Closest Images");
+				namedWindow(window_name, WINDOW_AUTOSIZE);
+				imshow(window_name, grid);
+				waitKey(0);
+				destroyWindow(window_name);
 			}
-			cout << endl;
+
+//			cout << "Query " << j << ". Keyframes returned: ";
+//			for (auto result : results) {
+//				cout << result.frame.index << ", ";
+//			}
+//			cout << endl;
 		}
 
 	}
