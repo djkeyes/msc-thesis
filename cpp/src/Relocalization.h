@@ -58,7 +58,7 @@ class Database;
 
 class Query {
 public:
-	Query(const Database * const parent_database, const Frame * const frame);
+	Query(const unsigned int parent_database_id, const Frame * const frame);
 
 	void computeFeatures();
 	void setFeatureDetector(cv::Ptr<cv::FeatureDetector> feature_detector);
@@ -67,10 +67,10 @@ public:
 	const std::vector<cv::KeyPoint>& getKeypoints() const;
 	const cv::Mat& getDescriptors() const;
 
-	const Database * const parent_database;
+	const unsigned int parent_database_id;
+	const Frame * const frame;
 private:
 
-	const Frame * const frame;
 
 	cv::Ptr<cv::FeatureDetector> featureDetector;
 	cv::Ptr<cv::DescriptorExtractor> descriptorExtractor;
@@ -102,6 +102,8 @@ public:
 	void setCachePath(boost::filesystem::path path) {
 		cachePath = path;
 	}
+
+	unsigned int db_id;
 
 private:
 

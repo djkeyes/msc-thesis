@@ -530,8 +530,8 @@ void Database::saveVocabulary(const cv::Mat& vocabulary) const {
 	ofs.close();
 }
 
-Query::Query(const Database * const parent_database, const Frame * const frame) :
-		parent_database(parent_database), frame(frame) {
+Query::Query(const unsigned int parent_database_id, const Frame * const frame) :
+		parent_database_id(parent_database_id), frame(frame) {
 }
 
 void Query::computeFeatures() {
