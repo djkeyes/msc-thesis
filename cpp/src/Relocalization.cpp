@@ -28,14 +28,12 @@ namespace sdl {
 
 fs::path Frame::getDescriptorFilename() const {
 	stringstream ss;
-	ss << "frame_" << setfill('0') << setw(6) << index
-			<< "_keypoints_and_descriptors.bin";
+	ss << "frame_" << setfill('0') << setw(6) << index << "_keypoints_and_descriptors.bin";
 	fs::path filename = cachePath / ss.str();
 	return filename;
 }
 
-bool Frame::loadDescriptors(vector<KeyPoint>& keypointsOut,
-		Mat& descriptorsOut) const {
+bool Frame::loadDescriptors(vector<KeyPoint>& keypointsOut, Mat& descriptorsOut) const {
 	if (cachePath.empty()) {
 		return false;
 	}
@@ -54,8 +52,7 @@ bool Frame::loadDescriptors(vector<KeyPoint>& keypointsOut,
 	ifs.read((char*) &data_type, sizeof(u_int32_t));
 
 	descriptorsOut.create(num_descriptors, descriptor_size, data_type);
-	ifs.read((char*) descriptorsOut.data,
-			num_descriptors * descriptor_size * descriptorsOut.elemSize());
+	ifs.read((char*) descriptorsOut.data, num_descriptors * descriptor_size * descriptorsOut.elemSize());
 
 	keypointsOut.reserve(num_descriptors);
 	for (int i = 0; i < num_descriptors; i++) {
@@ -68,16 +65,14 @@ bool Frame::loadDescriptors(vector<KeyPoint>& keypointsOut,
 		ifs.read((char*) &response, sizeof(float));
 		ifs.read((char*) &octave, sizeof(uint32_t));
 		ifs.read((char*) &class_id, sizeof(uint32_t));
-		keypointsOut.emplace_back(x, y, size, angle, response, octave,
-				class_id);
+		keypointsOut.emplace_back(x, y, size, angle, response, octave, class_id);
 	}
 
 	ifs.close();
 
 	return true;
 }
-void Frame::saveDescriptors(const vector<KeyPoint>& keypoints,
-		const Mat& descriptors) const {
+void Frame::saveDescriptors(const vector<KeyPoint>& keypoints, const Mat& descriptors) const {
 	if (cachePath.empty()) {
 		return;
 	}
@@ -95,8 +90,7 @@ void Frame::saveDescriptors(const vector<KeyPoint>& keypoints,
 	ofs.write((char*) &descriptor_size, sizeof(uint32_t));
 	ofs.write((char*) &data_type, sizeof(uint32_t));
 
-	ofs.write((char*) descriptors.data,
-			num_descriptors * descriptor_size * descriptors.elemSize());
+	ofs.write((char*) descriptors.data, num_descriptors * descriptor_size * descriptors.elemSize());
 	for (int i = 0; i < num_descriptors; i++) {
 		ofs.write((char*) &keypoints[i].pt.x, sizeof(float));
 		ofs.write((char*) &keypoints[i].pt.y, sizeof(float));
@@ -109,7 +103,6 @@ void Frame::saveDescriptors(const vector<KeyPoint>& keypoints,
 
 	ofs.close();
 }
-
 
 struct Database::InvertedIndexImpl {
 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -135,15 +128,12 @@ vector<Result> Database::lookup(const Query& query, unsigned int num_to_return) 
 
 	int descriptor_size = descriptorExtractor->descriptorSize();
 
-	vector<geometric_burstiness::QueryDescriptor<64>> query_descriptors(
-			num_features);
+	vector<geometric_burstiness::QueryDescriptor<64>> query_descriptors(num_features);
 
 	for (int j = 0; j < num_features; ++j) {
-		Map<MatrixXf> descriptor((float*) descriptors.row(j).data,
-				descriptor_size, 1);
+		Map<MatrixXf> descriptor((float*) descriptors.row(j).data, descriptor_size, 1);
 
-		pInvertedIndexImpl->invertedIndex.PrepareQueryDescriptor(descriptor,
-				&(query_descriptors[j]));
+		pInvertedIndexImpl->invertedIndex.PrepareQueryDescriptor(descriptor, &(query_descriptors[j]));
 		// TODO: use more than 1 nearest word?
 		int nearest_word = assignments[j];
 		query_descriptors[j].relevant_word_ids.push_back(nearest_word);
@@ -156,25 +146,23 @@ vector<Result> Database::lookup(const Query& query, unsigned int num_to_return) 
 		query_descriptors[j].feature_id = j;
 	}
 	for (int j = 0; j < num_features; ++j) {
-		for (unsigned int k = 0; k < query_descriptors[j].relevant_word_ids.size();
-				k++) {
+		for (unsigned int k = 0; k < query_descriptors[j].relevant_word_ids.size(); k++) {
 			query_descriptors[j].max_hamming_distance_per_word.push_back(32);
 		}
 	}
 
 	vector<geometric_burstiness::ImageScore> image_scores;
-	pInvertedIndexImpl->invertedIndex.QueryIndex(query_descriptors,
-			&image_scores);
+	pInvertedIndexImpl->invertedIndex.QueryIndex(query_descriptors, &image_scores);
 
 	vector<Result> results;
-	for (unsigned int i = 0;
-			i
-					< min(static_cast<unsigned int>(image_scores.size()),
-							num_to_return); ++i) {
+	for (unsigned int i = 0; i < min(static_cast<unsigned int>(image_scores.size()), num_to_return); ++i) {
+
 		results.emplace_back(*frames->at(image_scores[i].image_id));
 		for (const auto& correspondence : image_scores[i].matches) {
-			results.back().matches.emplace_back(correspondence.query_feature_id,
-					correspondence.db_feature_index, image_scores[i].image_id,
+			int db_feature_id = pInvertedIndexImpl->invertedIndex.GetIthEntryForWord(correspondence.db_feature_word,
+					correspondence.db_feature_index).feature_id;
+
+			results.back().matches.emplace_back(correspondence.query_feature_id, db_feature_id, image_scores[i].image_id,
 					correspondence.weight);
 		}
 	}
@@ -186,18 +174,14 @@ void Database::setFeatureDetector(Ptr<FeatureDetector> feature_detector) {
 	featureDetector = feature_detector;
 }
 
-void Database::setDescriptorExtractor(
-		Ptr<DescriptorExtractor> descriptor_extractor) {
+void Database::setDescriptorExtractor(Ptr<DescriptorExtractor> descriptor_extractor) {
 	descriptorExtractor = descriptor_extractor;
 }
-void Database::setBowExtractor(
-		Ptr<BOWSparseImgDescriptorExtractor> bow_extractor) {
+void Database::setBowExtractor(Ptr<BOWSparseImgDescriptorExtractor> bow_extractor) {
 	bowExtractor = bow_extractor;
 }
 
-int Database::computeFrameDescriptors(
-		map<int, vector<KeyPoint>>& image_keypoints,
-		map<int, Mat>& image_descriptors) {
+int Database::computeFrameDescriptors(map<int, vector<KeyPoint>>& image_keypoints, map<int, Mat>& image_descriptors) {
 
 	int total_descriptors = 0;
 
@@ -210,14 +194,10 @@ int Database::computeFrameDescriptors(
 		image_descriptors.insert(make_pair(frame->index, Mat()));
 
 		// this can be quite slow, so reload a cached copy from disk if it's available
-		if (!frame->loadDescriptors(image_keypoints[frame->index],
-				image_descriptors[frame->index])) {
+		if (!frame->loadDescriptors(image_keypoints[frame->index], image_descriptors[frame->index])) {
 			featureDetector->detect(colorImage, image_keypoints[frame->index]);
-			descriptorExtractor->compute(colorImage,
-					image_keypoints[frame->index],
-					image_descriptors[frame->index]);
-			frame->saveDescriptors(image_keypoints[frame->index],
-					image_descriptors[frame->index]);
+			descriptorExtractor->compute(colorImage, image_keypoints[frame->index], image_descriptors[frame->index]);
+			frame->saveDescriptors(image_keypoints[frame->index], image_descriptors[frame->index]);
 		}
 		total_descriptors += image_descriptors[frame->index].rows;
 	}
@@ -227,10 +207,8 @@ void Database::doClustering(const map<int, Mat>& image_descriptors) {
 
 	if (!loadVocabulary(vocabulary)) {
 		int max_iters = 10;
-		TermCriteria terminate_criterion(TermCriteria::MAX_ITER, max_iters,
-				0.0);
-		BOWApproxKMeansTrainer bow_trainer(vocabulary_size,
-				terminate_criterion);
+		TermCriteria terminate_criterion(TermCriteria::MAX_ITER, max_iters, 0.0);
+		BOWApproxKMeansTrainer bow_trainer(vocabulary_size, terminate_criterion);
 
 		for (const auto& element : *frames) {
 			int index = element.second->index;
@@ -248,15 +226,13 @@ void Database::doClustering(const map<int, Mat>& image_descriptors) {
 	bowExtractor->setVocabulary(vocabulary);
 }
 
-map<int, vector<int>> Database::computeBowDescriptors(
-		const map<int, Mat>& image_descriptors) {
+map<int, vector<int>> Database::computeBowDescriptors(const map<int, Mat>& image_descriptors) {
 	// Create training data by converting each keyframe to a bag of words
 	map<int, vector<int>> assignments;
 	for (const auto& element : *frames) {
 		int index = element.second->index;
 
-		bowExtractor->computeAssignments(image_descriptors.at(index),
-				assignments[index]);
+		bowExtractor->computeAssignments(image_descriptors.at(index), assignments[index]);
 	}
 	return assignments;
 }
@@ -276,8 +252,7 @@ MatrixXf Database::generateRandomProjection(int descriptor_size, int num_rows) {
 	MatrixXf projection = Q.topRows(num_rows);
 	return projection;
 }
-MatrixXf Database::computeHammingThresholds(const MatrixXf& projection_matrix,
-		const map<int, Mat>& image_descriptors,
+MatrixXf Database::computeHammingThresholds(const MatrixXf& projection_matrix, const map<int, Mat>& image_descriptors,
 		const map<int, vector<int>> descriptor_assignments) {
 	Matrix<float, 64, Eigen::Dynamic> hamming_thresholds;
 	hamming_thresholds.resize(64, vocabulary_size);
@@ -300,8 +275,7 @@ MatrixXf Database::computeHammingThresholds(const MatrixXf& projection_matrix,
 	for (int i = 0; i < num_images; ++i) {
 		randomly_permuted_db_ids[i] = i;
 	}
-	random_shuffle(randomly_permuted_db_ids.begin(),
-			randomly_permuted_db_ids.end());
+	random_shuffle(randomly_permuted_db_ids.begin(), randomly_permuted_db_ids.end());
 
 	cout << " Determining relevant images per word " << endl;
 	const int kNumDesiredDesc = 10000;
@@ -329,10 +303,9 @@ MatrixXf Database::computeHammingThresholds(const MatrixXf& projection_matrix,
 			// Ostensibly the opencv matrix is 1xD, and the eigen matrix needs
 			// to be Dx1, but it doesn't really matter since it's 1-dimensional
 			// and stored contiguously.
-			Map<MatrixXf> descriptor((float*)descriptors.row(j).data, descriptor_size, 1);
+			Map<MatrixXf> descriptor((float*) descriptors.row(j).data, descriptor_size, 1);
 
-			Eigen::Matrix<float, 64, 1> proj_sift = projection_matrix
-					* descriptor;
+			Eigen::Matrix<float, 64, 1> proj_sift = projection_matrix * descriptor;
 
 			for (int k = 0; k < 64; ++k) {
 				entries_per_word[closest_word][k].push_back(proj_sift[k]);
@@ -361,11 +334,9 @@ MatrixXf Database::computeHammingThresholds(const MatrixXf& projection_matrix,
 		} else {
 			const int median_element = num_desc / 2;
 			for (int k = 0; k < 64; ++k) {
-				nth_element(entries_per_word[i][k].begin(),
-						entries_per_word[i][k].begin() + median_element,
+				nth_element(entries_per_word[i][k].begin(), entries_per_word[i][k].begin() + median_element,
 						entries_per_word[i][k].end());
-				hamming_thresholds(k, i) =
-						entries_per_word[i][k][median_element];
+				hamming_thresholds(k, i) = entries_per_word[i][k][median_element];
 			}
 		}
 
@@ -395,14 +366,11 @@ bool Database::loadInvertedIndex(InvertedIndexImpl& inverted_index_impl) const {
 		return false;
 	}
 
-	bool success = inverted_index_impl.invertedIndex.LoadInvertedIndex(
-			filename.string());
-	success &= inverted_index_impl.invertedIndex.ReadWeightsAndConstants(
-			weights_filename.string());
+	bool success = inverted_index_impl.invertedIndex.LoadInvertedIndex(filename.string());
+	success &= inverted_index_impl.invertedIndex.ReadWeightsAndConstants(weights_filename.string());
 	return success;
 }
-void Database::saveInvertedIndex(
-		const InvertedIndexImpl& inverted_index_impl) const {
+void Database::saveInvertedIndex(const InvertedIndexImpl& inverted_index_impl) const {
 	if (cachePath.empty()) {
 		return;
 	}
@@ -414,9 +382,7 @@ void Database::saveInvertedIndex(
 	inverted_index_impl.invertedIndex.SaveWeightsAndConstants(weights_filename.string());
 }
 
-void Database::buildInvertedIndex(
-		const map<int, vector<KeyPoint>>& image_keypoints,
-		const map<int, Mat>& image_descriptors) {
+void Database::buildInvertedIndex(const map<int, vector<KeyPoint>>& image_keypoints, const map<int, Mat>& image_descriptors) {
 
 	if (loadInvertedIndex(*pInvertedIndexImpl)) {
 		return;
@@ -426,10 +392,8 @@ void Database::buildInvertedIndex(
 	map<int, vector<int>> descriptor_assignments = computeBowDescriptors(image_descriptors);
 	cout << "Finished computing bags of words." << endl;
 
-	MatrixXf projection_matrix = generateRandomProjection(
-			descriptorExtractor->descriptorSize(), 64);
-	MatrixXf hamming_thresholds = computeHammingThresholds(projection_matrix,
-			image_descriptors, descriptor_assignments);
+	MatrixXf projection_matrix = generateRandomProjection(descriptorExtractor->descriptorSize(), 64);
+	MatrixXf hamming_thresholds = computeHammingThresholds(projection_matrix, image_descriptors, descriptor_assignments);
 
 	geometric_burstiness::InvertedIndex<64>& inverted_index = pInvertedIndexImpl->invertedIndex;
 	cout << "initializing index to vocabulary size " << vocabulary_size << endl;
@@ -456,6 +420,7 @@ void Database::buildInvertedIndex(
 		for (int j = 0; j < num_features; ++j, ++total_number_entries) {
 			geometric_burstiness::InvertedFileEntry<64> entry;
 			entry.image_id = index;
+			entry.feature_id = j;
 			entry.x = keypoints[j].pt.x;
 			entry.y = keypoints[j].pt.y;
 			// TODO(daniel): These are geometric properties of affine
@@ -472,13 +437,12 @@ void Database::buildInvertedIndex(
 				throw runtime_error("Impossible word " + closest_word);
 			}
 
-			Map<MatrixXf> descriptor((float*)descriptors.row(j).data, descriptor_size, 1);
+			Map<MatrixXf> descriptor((float*) descriptors.row(j).data, descriptor_size, 1);
 
 			inverted_index.AddEntry(entry, closest_word, descriptor);
 		}
 	}
-	cout << " The index contains " << total_number_entries << " entries "
-			<< "in total" << endl;
+	cout << " The index contains " << total_number_entries << " entries " << "in total" << endl;
 
 	cout << " Estimates the descriptor space densities " << endl;
 	inverted_index.EstimateDescriptorSpaceDensities();
@@ -498,10 +462,8 @@ void Database::train() {
 	map<int, Mat> image_descriptors;
 
 	cout << "computing descriptors for each keyframe..." << endl;
-	int descriptor_count = computeFrameDescriptors(image_keypoints,
-			image_descriptors);
-	cout << "computed " << descriptor_count << " descriptors in "
-			<< frames->size() << " frames." << endl;
+	int descriptor_count = computeFrameDescriptors(image_keypoints, image_descriptors);
+	cout << "computed " << descriptor_count << " descriptors in " << frames->size() << " frames." << endl;
 
 	cout << "Training vocabulary..." << endl;
 	doClustering(image_descriptors);
@@ -563,8 +525,7 @@ void Database::saveVocabulary(const cv::Mat& vocabulary) const {
 	ofs.write((char*) &vocabulary.cols, sizeof(uint32_t));
 	ofs.write((char*) &size, sizeof(uint32_t));
 	ofs.write((char*) &type, sizeof(uint32_t));
-	ofs.write((char*) vocabulary.data,
-			vocabulary.rows * vocabulary.cols * size);
+	ofs.write((char*) vocabulary.data, vocabulary.rows * vocabulary.cols * size);
 
 	ofs.close();
 }
@@ -588,7 +549,6 @@ void Query::setDescriptorExtractor(Ptr<DescriptorExtractor> descriptor_extractor
 void Query::setFeatureDetector(Ptr<FeatureDetector> feature_detector) {
 	featureDetector = feature_detector;
 }
-
 
 const Mat Query::readColorImage() const {
 	return imread(frame->imagePath.string());

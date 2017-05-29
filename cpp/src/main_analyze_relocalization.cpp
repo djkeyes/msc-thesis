@@ -9,6 +9,7 @@
 
 #include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
+#include "opencv2/calib3d/calib3d.hpp"
 #include "opencv2/xfeatures2d.hpp"
 #include "opencv2/highgui.hpp"
 #include "opencv2/imgproc.hpp"
@@ -21,7 +22,7 @@ using namespace std;
 using namespace sdl;
 using namespace cv;
 
-bool display_top_matching_images = true;
+bool display_top_matching_images = false;
 
 class SceneParser {
 public:
@@ -31,8 +32,7 @@ public:
 	/*
 	 * Parse a scene into a set of databases and a set of queries (which may be built from overlapping data).
 	 */
-	virtual void parseScene(vector<sdl::Database>& dbs,
-			vector<sdl::Query>& queries) = 0;
+	virtual void parseScene(vector<sdl::Database>& dbs, vector<sdl::Query>& queries) = 0;
 };
 class SevenScenesParser: public SceneParser {
 public:
@@ -41,8 +41,7 @@ public:
 	}
 	virtual ~SevenScenesParser() {
 	}
-	virtual void parseScene(vector<sdl::Database>& dbs,
-			vector<sdl::Query>& queries) {
+	virtual void parseScene(vector<sdl::Database>& dbs, vector<sdl::Query>& queries) {
 		vector<fs::path> sequences;
 		for (auto dir : fs::recursive_directory_iterator(directory)) {
 			if (!fs::is_directory(dir)) {
@@ -87,7 +86,7 @@ public:
 		}
 	}
 
-	void setCache(fs::path cache_dir){
+	void setCache(fs::path cache_dir) {
 		cache = cache_dir;
 	}
 
@@ -106,14 +105,12 @@ void usage(char** argv, const po::options_description commandline_args) {
 
 void parseArguments(int argc, char** argv) {
 	// Arguments, can be specified on commandline or in a file settings.config
-	po::options_description commandline_exclusive(
-			"Allowed options from terminal");
+	po::options_description commandline_exclusive("Allowed options from terminal");
 	commandline_exclusive.add_options()
 			("help", "Print this help message.")
 			("config", po::value<string>(), "Path to a config file, which can specify any other argument.");
 
-	po::options_description general_args(
-			"Allowed options from terminal or config file");
+	po::options_description general_args("Allowed options from terminal or config file");
 	general_args.add_options()
 			("scene", po::value<string>(), "Type of scene. Currently the only allowed type is 7scenes.")
 			("datadir", po::value<string>()->default_value(""), "Directory of the scene dataset. For datasets composed"
@@ -127,9 +124,7 @@ void parseArguments(int argc, char** argv) {
 
 	// check for config file
 	po::variables_map vm;
-	po::store(
-			po::command_line_parser(argc, argv).options(commandline_exclusive).allow_unregistered().run(),
-			vm);
+	po::store(po::command_line_parser(argc, argv).options(commandline_exclusive).allow_unregistered().run(), vm);
 	po::notify(vm);
 
 	if (vm.count("help")) {
@@ -141,26 +136,21 @@ void parseArguments(int argc, char** argv) {
 	if (vm.count("config")) {
 		ifstream ifs(vm["config"].as<string>());
 		if (!ifs) {
-			cout << "could not open config file " << vm["config"].as<string>()
-					<< endl;
+			cout << "could not open config file " << vm["config"].as<string>() << endl;
 			exit(1);
 		}
 		vm.clear();
 		// since config is added last, commandline args have precedence over args in the config file.
-		po::store(
-				po::command_line_parser(argc, argv).options(commandline_args).run(),
-				vm);
+		po::store(po::command_line_parser(argc, argv).options(commandline_args).run(), vm);
 		po::store(po::parse_config_file(ifs, general_args), vm);
 	} else {
 		vm.clear();
-		po::store(
-				po::command_line_parser(argc, argv).options(commandline_args).run(),
-				vm);
+		po::store(po::command_line_parser(argc, argv).options(commandline_args).run(), vm);
 	}
 	po::notify(vm);
 
 	fs::path cache_dir;
-	if(vm.count("cache")){
+	if (vm.count("cache")) {
 		cache_dir = fs::path(vm["cache"].as<string>());
 	}
 
@@ -173,7 +163,7 @@ void parseArguments(int argc, char** argv) {
 		if (scene_type.find("7scenes") == 0) {
 			fs::path directory(vm["datadir"].as<string>());
 			SevenScenesParser* parser = new SevenScenesParser(directory);
-			if(!cache_dir.empty()){
+			if (!cache_dir.empty()) {
 				parser->setCache(cache_dir);
 			}
 			scene_parser = unique_ptr<SceneParser>(parser);
@@ -204,9 +194,7 @@ int main(int argc, char** argv) {
 		db.setVocabularySize(vocabulary_size);
 		db.setFeatureDetector(sift);
 		db.setDescriptorExtractor(sift);
-		db.setBowExtractor(
-				makePtr<BOWSparseImgDescriptorExtractor>(sift,
-						FlannBasedMatcher::create()));
+		db.setBowExtractor(makePtr<BOWSparseImgDescriptorExtractor>(sift, FlannBasedMatcher::create()));
 		db.train();
 	}
 	for (sdl::Query& query : queries) {
@@ -215,6 +203,12 @@ int main(int argc, char** argv) {
 		query.computeFeatures();
 	}
 
+	int img_width, img_height;
+	{
+		Mat probe_image = queries[0].readColorImage();
+		img_width = probe_image.cols;
+		img_height = probe_image.rows;
+	}
 	int num_to_return = 8;
 	for (unsigned int i = 0; i < dbs.size(); i++) {
 		for (unsigned int j = 0; j < queries.size(); j++) {
@@ -224,10 +218,6 @@ int main(int argc, char** argv) {
 
 			vector<sdl::Result> results = dbs[i].lookup(queries[j], num_to_return);
 
-			// compute a homography for each result, then rank by number of inliers
-
-			// TODO: analyzer quality of results somehow
-
 			// display the result in a pretty window
 			if (j < 5 && display_top_matching_images) {
 
@@ -235,17 +225,13 @@ int main(int argc, char** argv) {
 				int rows = 3, cols = 3;
 				int bordersize = 3;
 				Mat grid(height, width, CV_8UC3);
-				rectangle(grid, Point(0, 0), Point(width, height),
-						Scalar(255, 255, 255), FILLED, LINE_8);
-				rectangle(grid, Point(0, 0), Point(width / cols, height / rows),
-						Scalar(0, 0, 255), FILLED, LINE_8);
+				rectangle(grid, Point(0, 0), Point(width, height), Scalar(255, 255, 255), FILLED, LINE_8);
+				rectangle(grid, Point(0, 0), Point(width / cols, height / rows), Scalar(0, 0, 255), FILLED, LINE_8);
 
 				for (int c = 0; c < cols; ++c) {
 					for (int r = 0; r < rows; ++r) {
-						Point start(bordersize + c * width / cols,
-								bordersize + r * height / rows);
-						Point end((c + 1) * width / cols - bordersize,
-								(r + 1) * height / rows - bordersize);
+						Point start(bordersize + c * width / cols, bordersize + r * height / rows);
+						Point end((c + 1) * width / cols - bordersize, (r + 1) * height / rows - bordersize);
 						int tilewidth = end.x - start.x;
 						int tileheight = end.y - start.y;
 
@@ -258,17 +244,14 @@ int main(int argc, char** argv) {
 						} else {
 							// load db match
 							int index = cols * r + c - 1;
-							image = imread(
-									results[index].frame.imagePath.string());
+							image = imread(results[index].frame.imagePath.string());
 							stringstream ss;
 							ss << "rank=" << index;
 							text = ss.str();
 						}
 						resize(image, image, Size(tilewidth, tileheight));
-						putText(image, text, Point(tilewidth / 2 - 30, 15),
-								FONT_HERSHEY_PLAIN, 0.9, Scalar(255, 255, 255));
-						image.copyTo(
-								grid(Rect(start.x, start.y, tilewidth, tileheight)));
+						putText(image, text, Point(tilewidth / 2 - 30, 15), FONT_HERSHEY_PLAIN, 0.9, Scalar(255, 255, 255));
+						image.copyTo(grid(Rect(start.x, start.y, tilewidth, tileheight)));
 					}
 				}
 				string window_name("Closest Images");
@@ -277,6 +260,49 @@ int main(int argc, char** argv) {
 				waitKey(0);
 				destroyWindow(window_name);
 			}
+
+			// TODO compute an essential matrix from each result to the query, then rank by number of inliers
+
+			// for now, just the first image
+			vector<Point2f> query_pts;
+			vector<Point2f> database_pts;
+
+			const vector<KeyPoint>& query_keypoints = queries[j].getKeypoints();
+			vector<KeyPoint> result_keypoints;
+			Mat dummy;
+			results[0].frame.loadDescriptors(result_keypoints, dummy);
+
+			for (auto& correspondence : results[0].matches) {
+				query_pts.push_back(query_keypoints[correspondence.queryIdx].pt);
+				database_pts.push_back(result_keypoints[correspondence.trainIdx].pt);
+			}
+			int ransac_threshold = 5; // in pixels
+			double confidence = 0.99;
+
+			// TODO: use an actually calibrated camera model
+			Mat K = Mat::zeros(3, 3, CV_32FC1);
+			K.at<float>(0, 0) = 1;
+			K.at<float>(1, 1) = 1;
+			K.at<float>(0, 2) = img_width / 2;
+			K.at<float>(1, 2) = img_height / 2;
+			K.at<float>(2, 2) = 1;
+			Mat E = findEssentialMat(query_pts, database_pts, K, RANSAC, confidence, ransac_threshold);
+			Mat R, t;
+			recoverPose(E, query_pts, database_pts, K, R, t);
+			cout << "relative pose: " << R << endl << t << endl;
+
+			int max_iters = 2000;
+			Mat H = findHomography(query_pts, database_pts, RANSAC, ransac_threshold, noArray(), max_iters, confidence);
+			vector<Point2f> transformed_points;
+			cout << "homography: " << H << endl;
+			perspectiveTransform(query_pts, transformed_points, H);
+			int num_inliers = 0;
+			for (unsigned int i = 0; i < transformed_points.size(); ++i) {
+				if (norm(transformed_points[i] - database_pts[i]) < ransac_threshold) {
+					num_inliers++;
+				}
+			}
+			cout << "num inliers: " << num_inliers << endl;
 
 //			cout << "Query " << j << ". Keyframes returned: ";
 //			for (auto result : results) {
