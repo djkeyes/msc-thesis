@@ -103,13 +103,17 @@ target_link_libraries(main_run_semidense
 add_executable(main_analyze_relocalization
     src/Relocalization.h
     src/LargeBagOfWords.h
+    src/MapGenerator.h
     
     src/LargeBagOfWords.cpp
     src/Relocalization.cpp
+    src/MapGenerator.cpp
     src/main_analyze_relocalization.cpp
 )
 
 target_link_libraries(main_analyze_relocalization
+    ${DSO_LIBRARY}
+    ${LIBZIP_LIBRARY}
     ${OpenCV_LIBS}
     boost_filesystem
     boost_program_options

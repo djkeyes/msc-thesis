@@ -13,6 +13,7 @@
 #include "opencv2/ml.hpp"
 #include "boost/filesystem.hpp"
 
+#include "MapGenerator.h"
 #include "LargeBagOfWords.h"
 
 namespace sdl {
@@ -92,6 +93,7 @@ public:
 	void setVocabularySize(int size) {
 		vocabulary_size = size;
 	}
+	void setMapper(std::unique_ptr<MapGenerator> map_gen);
 	void setFeatureDetector(cv::Ptr<cv::FeatureDetector> feature_detector);
 	void setDescriptorExtractor(
 			cv::Ptr<cv::DescriptorExtractor> descriptor_extractor);
@@ -112,6 +114,7 @@ private:
 	void saveVocabulary(const cv::Mat& vocabulary) const;
 
 	// Utility functions used in train()
+	void doMapping();
 	int computeFrameDescriptors(
 			std::map<int, std::vector<cv::KeyPoint>>& image_keypoints,
 			std::map<int, cv::Mat>& image_descriptors);
@@ -133,6 +136,8 @@ private:
 	boost::filesystem::path cachePath;
 
 	int vocabulary_size = 100000;
+
+	std::unique_ptr<MapGenerator> mapGen;
 
 	cv::Ptr<cv::DescriptorExtractor> descriptorExtractor;
 	cv::Ptr<cv::FeatureDetector> featureDetector;

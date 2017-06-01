@@ -6,6 +6,8 @@
 #include <utility>
 #include <list>
 
+#include "opencv2/core/mat.hpp"
+
 #include "util/NumType.h"
 #include "util/DatasetReader.h"
 #include "util/MinimalImage.h"
@@ -40,6 +42,7 @@ public:
 
 	DsoMapGenerator(int argc, char** argv);
 	DsoMapGenerator(const std::string& input_path);
+	DsoMapGenerator(cv::Mat camera_calib, const std::string& image_path, const std::string& cache_path);
 
 	void initVisualOdometry();
 	void runVisualOdometry(const std::vector<int>& indices_to_play);

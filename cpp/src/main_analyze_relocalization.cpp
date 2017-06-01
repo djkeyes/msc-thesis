@@ -151,7 +151,9 @@ void parseArguments(int argc, char** argv) {
 					" descriptors or visual vocabulary, between runs.")
 			("epsilon_angle_deg", po::value<double>(), "Angle in degrees for a pose to be considered accurate.")
 			("epsilon_translation", po::value<double>(), "Distance in the scene coordinate system for a pose"
-					" to be considered accurate.");
+					" to be considered accurate.")
+			("mapping_method", po::value<string>()->default_value(""), "Mapping/SLAM method for building a map"
+					" to relocalize against. Can be 'DSO' or left empty.");
 
 	po::options_description commandline_args;
 	commandline_args.add(commandline_exclusive).add(general_args);
@@ -231,7 +233,6 @@ int main(int argc, char** argv) {
 		db.setFeatureDetector(sift);
 		db.setDescriptorExtractor(sift);
 		db.setBowExtractor(makePtr<BOWSparseImgDescriptorExtractor>(sift, FlannBasedMatcher::create()));
-		db.train();
 	}
 	for (sdl::Query& query : queries) {
 		query.setFeatureDetector(sift);
@@ -245,12 +246,28 @@ int main(int argc, char** argv) {
 		img_width = probe_image.cols;
 		img_height = probe_image.rows;
 	}
+	// TODO: use an actually calibrated camera model
+	Mat K = Mat::zeros(3, 3, CV_32FC1);
+	K.at<float>(0, 0) = (img_width + img_height) / 2.;
+	K.at<float>(1, 1) = (img_width + img_height) / 2.;
+	K.at<float>(0, 2) = img_width / 2 - 0.5;
+	K.at<float>(1, 2) = img_height / 2 - 0.5;
+	K.at<float>(2, 2) = 1;
+
+	for (auto& db : dbs) {
+//		db.setMapper(unique_ptr<DsoMapGenerator>(new DsoMapGenerator(K, db.getImagePath(), db.getCachePath())));
+		db.train();
+	}
+
 	int num_to_return = 8;
 
 	unsigned int total_test_queries = 0;
 	unsigned int epsilon_accurate_test_queries = 0;
+	unsigned int high_inlier_test_queries = 0;
 	unsigned int total_train_queries = 0;
 	unsigned int epsilon_accurate_train_queries = 0;
+	unsigned int high_inlier_train_queries = 0;
+
 	cout << endl;
 
 	for (unsigned int i = 0; i < dbs.size(); i++) {
@@ -366,22 +383,28 @@ int main(int argc, char** argv) {
 				database_pts.push_back(result_keypoints[correspondence.trainIdx].pt);
 			}
 			int ransac_threshold = 3; // in pixels, for the sampson error
-			double confidence = 0.999;
+			// TODO: the number of inliers registered for trainset images is
+			// extremely low. Perhaps they are coplanar or otherwise
+			// ill-conditioned? Setting confidence to 1 forces RANSAC to use
+			// its default maximum number of iterations (1000), but it would
+			// be better to filter the data, or increase the max number of
+			// trials.
+			double confidence = 0.999999;
 
-			// TODO: use an actually calibrated camera model
-			Mat K = Mat::zeros(3, 3, CV_32FC1);
-			K.at<float>(0, 0) = (img_width + img_height) / 2.;
-			K.at<float>(1, 1) = (img_width + img_height) / 2.;
-			K.at<float>(0, 2) = img_width / 2 - 0.5;
-			K.at<float>(1, 2) = img_height / 2 - 0.5;
-			K.at<float>(2, 2) = 1;
-
-			Mat E, R, t;
 			// pretty sure this is the correct order
 			Mat inlier_mask;
-			E = findEssentialMat(database_pts, query_pts, K, RANSAC, confidence, ransac_threshold, inlier_mask);
-			recoverPose(E, database_pts, query_pts, K, R, t, inlier_mask);
+			Mat E = findEssentialMat(database_pts, query_pts, K, RANSAC, confidence, ransac_threshold, inlier_mask);
+			Mat R, t;
+			int num_inliers = recoverPose(E, database_pts, query_pts, K, R, t, inlier_mask);
 			// watch out: E, R, & t are double precision (even though we only ever passed floats)
+
+			if (num_inliers >= 12) {
+				if (queries[j].parent_database_id == dbs[i].db_id) {
+					high_inlier_train_queries++;
+				} else {
+					high_inlier_test_queries++;
+				}
+			}
 
 			R = R.t();
 			t = -R * t;
@@ -416,17 +439,21 @@ int main(int argc, char** argv) {
 
 	}
 
-	double train_accuracy = static_cast<double>(epsilon_accurate_train_queries) / total_train_queries;
-	double test_accuracy = static_cast<double>(epsilon_accurate_test_queries) / total_test_queries;
+	double train_reg_accuracy = static_cast<double>(high_inlier_train_queries) / total_train_queries;
+	double test_reg_accuracy = static_cast<double>(high_inlier_test_queries) / total_test_queries;
+	double train_loc_accuracy = static_cast<double>(epsilon_accurate_train_queries) / total_train_queries;
+	double test_loc_accuracy = static_cast<double>(epsilon_accurate_test_queries) / total_test_queries;
 
 	cout << endl;
 	cout << "Processed " << (total_test_queries + total_train_queries) << " queries! (" << total_train_queries
 			<< " queries on their own train set database, and " << total_test_queries
 			<< " on separate test set databases)" << endl;
-	cout << "Train set accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg << " deg): "
-			<< train_accuracy << endl;
-	cout << "Test set accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg << " deg): "
-			<< test_accuracy << endl;
+	cout << "Train set registration accuracy (num inliers after pose recovery >= 12): " << train_reg_accuracy << endl;
+	cout << "Test set registration accuracy (num inliers after pose recovery >= 12): " << test_reg_accuracy << endl;
+	cout << "Train set localization accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg << " deg): "
+			<< train_loc_accuracy << endl;
+	cout << "Test set localization accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg << " deg): "
+			<< test_loc_accuracy << endl;
 
 // TODO:
 // -for each full run, compute some database info

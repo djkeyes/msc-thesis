@@ -239,6 +239,39 @@ DsoMapGenerator::DsoMapGenerator(const string& input_path) {
 
 	mode = 0;
 }
+
+/*
+ * Create an instance using just a camera calibration. Geometric calibration
+ * is disabled, gamma is set to a default value, and all frames are treated
+ * as keyframes.
+ */
+DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, const string& image_path, const string& cache_path) {
+	setting_desiredImmatureDensity = 1500;
+	setting_desiredPointDensity = 2000;
+	setting_minFrames = 5;
+	setting_maxFrames = 7;
+	setting_maxOptIterations = 6;
+	setting_minOptIterations = 1;
+	setting_realTimeMaxKF = true;
+
+	setting_logStuff = false;
+
+	disableAllDisplay = true;
+
+//	setting_debugout_runquiet = true;
+
+	// to handle datasets other than tum monoVO, we'll need to change these
+	// paths, and change the mode and photometric calibration weights
+	source = image_path;
+
+	setting_photometricCalibration = 0;
+	setting_affineOptModeA = 0;
+	setting_affineOptModeB = 0;
+
+	mode = 1;
+}
+
+
 void DsoMapGenerator::initVisualOdometry() {
 	reader = unique_ptr<ImageFolderReader>(
 			new ImageFolderReader(source, calib, gammaCalib, vignette));
@@ -251,6 +284,7 @@ void DsoMapGenerator::initVisualOdometry() {
 		exit(1);
 	}
 }
+
 void DsoMapGenerator::runVisualOdometry() {
 	vector<int> idsToPlay;
 	for (int i = 0; i < reader->getNumImages(); ++i) {

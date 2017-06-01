@@ -13,6 +13,7 @@
 #include "opencv2/imgcodecs.hpp"
 #include "geometricburstiness/inverted_index.h"
 
+#include "MapGenerator.h"
 #include "Relocalization.h"
 #include "LargeBagOfWords.h"
 
@@ -180,7 +181,13 @@ void Database::setDescriptorExtractor(Ptr<DescriptorExtractor> descriptor_extrac
 void Database::setBowExtractor(Ptr<BOWSparseImgDescriptorExtractor> bow_extractor) {
 	bowExtractor = bow_extractor;
 }
+void Database::setMapper(unique_ptr<MapGenerator> map_gen){
+	mapGen = move(map_gen);
+}
 
+void Database::doMapping() {
+	mapGen->runVisualOdometry();
+}
 int Database::computeFrameDescriptors(map<int, vector<KeyPoint>>& image_keypoints, map<int, Mat>& image_descriptors) {
 
 	int total_descriptors = 0;
@@ -460,6 +467,10 @@ void Database::train() {
 
 	map<int, vector<KeyPoint>> image_keypoints;
 	map<int, Mat> image_descriptors;
+
+	cout << "Mapping environment using specified SLAM system..." << endl;
+	doMapping();
+	cout << "Mapping complete." << endl;
 
 	cout << "computing descriptors for each keyframe..." << endl;
 	int descriptor_count = computeFrameDescriptors(image_keypoints, image_descriptors);
