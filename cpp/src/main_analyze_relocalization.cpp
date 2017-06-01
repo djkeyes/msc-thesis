@@ -253,8 +253,6 @@ int main(int argc, char** argv) {
 	unsigned int epsilon_accurate_train_queries = 0;
 	cout << endl;
 
-	map<int, pair<Mat, Mat>> actualAndExpectedPoses;
-
 	for (unsigned int i = 0; i < dbs.size(); i++) {
 		for (unsigned int j = 0; j < queries.size(); j++) {
 			if (queries[j].parent_database_id == dbs[i].db_id) {
@@ -414,26 +412,9 @@ int main(int argc, char** argv) {
 				}
 			}
 
-			if ((i == 0) && (queries[j].parent_database_id != dbs[i].db_id)) {
-				actualAndExpectedPoses.insert(make_pair(queries[j].frame->index, make_pair(estimated_t, query_t_gt)));
-			}
 		}
 
 	}
-
-	ofstream actual_file("actual.txt");
-	ofstream expected_file("expected.txt");
-	for (const auto& element : actualAndExpectedPoses) {
-		const Mat& actual = element.second.first;
-		const Mat& expected = element.second.second;
-		actual_file << actual.at<double>(0, 0) << " " << actual.at<double>(1, 0) << " " << actual.at<double>(2, 0)
-				<< endl;
-		expected_file << expected.at<double>(0, 0) << " " << expected.at<double>(1, 0) << " "
-				<< expected.at<double>(2, 0) << endl;
-	}
-	actual_file.close();
-	expected_file.close();
-
 
 	double train_accuracy = static_cast<double>(epsilon_accurate_train_queries) / total_train_queries;
 	double test_accuracy = static_cast<double>(epsilon_accurate_test_queries) / total_test_queries;
