@@ -367,27 +367,35 @@ int main(int argc, char** argv) {
 				query_pts.push_back(query_keypoints[correspondence.queryIdx].pt);
 				database_pts.push_back(result_keypoints[correspondence.trainIdx].pt);
 			}
-			int ransac_threshold = 5; // in pixels
+			int ransac_threshold = 3; // in pixels, for the sampson error
 			double confidence = 0.999;
 
 			// TODO: use an actually calibrated camera model
 			Mat K = Mat::zeros(3, 3, CV_32FC1);
-			K.at<float>(0, 0) = 1;//585;
-			K.at<float>(1, 1) = 1;//585;
+			K.at<float>(0, 0) = (img_width + img_height) / 2.;
+			K.at<float>(1, 1) = (img_width + img_height) / 2.;
 			K.at<float>(0, 2) = img_width / 2 - 0.5;
 			K.at<float>(1, 2) = img_height / 2 - 0.5;
 			K.at<float>(2, 2) = 1;
 
 			Mat E, R, t;
 			// pretty sure this is the correct order
-			E = findEssentialMat(database_pts, query_pts, K, RANSAC, confidence, ransac_threshold);
-			recoverPose(E, database_pts, query_pts, K, R, t);
+			Mat inlier_mask;
+			E = findEssentialMat(database_pts, query_pts, K, RANSAC, confidence, ransac_threshold, inlier_mask);
+			recoverPose(E, database_pts, query_pts, K, R, t, inlier_mask);
 			// watch out: E, R, & t are double precision (even though we only ever passed floats)
+
+			R = R.t();
+			t = -R * t;
 
 			Mat db_R_gt, db_t_gt;
 			scene_parser->loadGroundTruthPose(top_result.frame, db_R_gt, db_t_gt);
 			Mat query_R_gt, query_t_gt;
 			scene_parser->loadGroundTruthPose(*queries[j].frame, query_R_gt, query_t_gt);
+
+			// This is only known up to scale. So cheat by fixing the scale to the ground truth.
+			t *= norm(db_t_gt - query_t_gt)/norm(t);
+
 			Mat estimated_R = db_R_gt * R;
 			Mat estimated_t = db_R_gt * t + db_t_gt;
 
@@ -407,15 +415,6 @@ int main(int argc, char** argv) {
 			}
 
 			if ((i == 0) && (queries[j].parent_database_id != dbs[i].db_id)) {
-				cout << "query is " <<  queries[j].frame->imagePath.string() << endl;
-				cout << "db image is " << top_result.frame.imagePath.string() << endl;
-				cout << "translation error: " << translation_error << endl;
-				cout << "estimated translation: " << estimated_t.t() << endl;
-				cout << "db translation: " << db_t_gt.t() << endl;
-				cout << "query translation: " << query_t_gt.t() << endl;
-				cout << "database " << i << ", query with database "
-						<< queries[j].parent_database_id << endl;
-				cout << endl;
 				actualAndExpectedPoses.insert(make_pair(queries[j].frame->index, make_pair(estimated_t, query_t_gt)));
 			}
 		}
