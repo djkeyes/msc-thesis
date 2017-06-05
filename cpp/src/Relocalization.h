@@ -105,6 +105,14 @@ public:
 		cachePath = path;
 	}
 
+	const boost::filesystem::path& getCachePath() {
+		return cachePath;
+	}
+
+	void setMapper(MapGenerator* map_gen) {
+		mapGen = std::unique_ptr<MapGenerator>(map_gen);
+	}
+
 	unsigned int db_id;
 
 private:

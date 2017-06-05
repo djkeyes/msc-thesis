@@ -11,6 +11,7 @@
 
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
+#include <Eigen/Core>
 
 #include "util/settings.h"
 #include "util/DatasetReader.h"
@@ -26,6 +27,98 @@ using IOWrap::Output3DWrapper;
 namespace sdl {
 
 bool print_debug_info = false;
+
+/*
+ * Allows you to read from a TUM monoVO dataset using DSO's ImageFolderReader
+ */
+class DefaultTumReader: public DsoDatasetReader {
+public:
+	DefaultTumReader(const string& source, const string& calib, const string& gamma_calib, const string& vignette) :
+			reader(source, calib, gamma_calib, vignette) {
+		reader.setGlobalCalibration();
+		if (setting_photometricCalibration > 0 && reader.getPhotometricGamma() == 0) {
+			printf("ERROR: don't have photometric calibation. Need to use commandline options mode=1 ");
+			exit(1);
+		}
+	}
+
+	~DefaultTumReader() = default;
+
+	virtual float* getPhotometricGamma() {
+		return reader.getPhotometricGamma();
+	}
+
+	virtual int getNumImages() {
+		return reader.getNumImages();
+	}
+	virtual ImageAndExposure* getImage(int id) {
+		return reader.getImage(id);
+	}
+
+	ImageFolderReader reader;
+};
+
+/*
+ * Read a dataset specified simply as a list of files, plus camera calibration. This assumes the files have already been
+ * somewhat rectified so that the calibration matrix is simply a pinhole camera model.
+ */
+class SimpleReader: public DsoDatasetReader {
+public:
+	SimpleReader(const vector<string>& image_paths, cv::Mat K, int width, int height, string tmp_dir) :
+			imagePaths(image_paths), dummyPhotometricGamma(255) {
+		for (unsigned int i = 0; i < dummyPhotometricGamma.size(); i++) {
+			dummyPhotometricGamma[i] = i;
+		}
+
+		createUndistorterFromTmpFile(K, width, height, tmp_dir + "/calib.txt");
+
+		// need to perform global initialization
+		cv::Mat K_;
+		K.convertTo(K_, CV_32F);
+		Eigen::Map<Eigen::Matrix3f> K_as_eigen((float*) K_.data);
+		setGlobalCalib(width, height, K_as_eigen);
+	}
+	~SimpleReader() = default;
+
+	virtual float* getPhotometricGamma() {
+		return &dummyPhotometricGamma[0];
+	}
+	virtual int getNumImages() {
+		return imagePaths.size();
+	}
+	virtual ImageAndExposure* getImage(int id) {
+		unique_ptr<MinimalImageB> min_img(IOWrap::readImageBW_8U(imagePaths[id].c_str()));
+		ImageAndExposure* ret2 = pinholeUndistorter->undistort<unsigned char>(min_img.get(), 1.0f, 0.0);
+		return ret2;
+	}
+
+private:
+
+	void createUndistorterFromTmpFile(cv::Mat K, int width, int height, const string& tmp_file) {
+		ofstream ofs(tmp_file);
+		cv::Mat K_;
+		K.convertTo(K_, CV_64F);
+
+		// Pinhole fx fy cx cy 0
+		ofs << "Pinhole " << K_.at<double>(0, 0) << " " << K_.at<double>(1, 1) << " " << K_.at<double>(0, 2) << " "
+				<< K_.at<double>(1, 2) << " 0" << endl;
+		// in_width in_height
+		ofs << width << " " << height << endl;
+		// "crop" / "full" / "none" / "fx fy cx cy 0"
+		ofs << "none" << endl;
+		// out_width out_height
+		ofs << width << " " << height << endl;
+		ofs.close();
+		pinholeUndistorter = unique_ptr<Undistort>(new UndistortPinhole(tmp_file.c_str(), false));
+
+		// this produces a lot of chitchat on stdout, but there's not a good way to silence it without
+		// completely re-implementing Undistort :(
+		pinholeUndistorter->loadPhotometricCalibration("", "", "");
+	}
+	const vector<string> imagePaths;
+	vector<float> dummyPhotometricGamma;
+	unique_ptr<Undistort> pinholeUndistorter;
+};
 
 struct DsoOutputRecorder: public Output3DWrapper {
 	unique_ptr<list<ColoredPoint>> coloredPoints;
@@ -212,9 +305,13 @@ DsoMapGenerator::DsoMapGenerator(int argc, char** argv) {
 
 	disableAllDisplay = true;
 
+	string source, calib, gamma_calib, vignette;
 	for (int i = 0; i < argc; i++) {
-		parseArgument(argv[i]);
+		parseArgument(argv[i], source, calib, gamma_calib, vignette);
 	}
+
+	datasetReader = unique_ptr<DsoDatasetReader>(
+			new DefaultTumReader(source, calib, gamma_calib, vignette));
 }
 DsoMapGenerator::DsoMapGenerator(const string& input_path) {
 	setting_desiredImmatureDensity = 1500;
@@ -232,12 +329,15 @@ DsoMapGenerator::DsoMapGenerator(const string& input_path) {
 
 	// to handle datasets other than tum monoVO, we'll need to change these
 	// paths, and change the mode and photometric calibration weights
-	source = input_path + "/images.zip";
-	calib = input_path + "/camera.txt";
-	vignette = input_path + "/vignette.png";
-	gammaCalib = input_path + "/pcalib.txt";
+	string source = input_path + "/images.zip";
+	string calib = input_path + "/camera.txt";
+	string gamma_calib = input_path + "/pcalib.txt";
+	string vignette = input_path + "/vignette.png";
 
 	mode = 0;
+
+	datasetReader = unique_ptr<DsoDatasetReader>(
+			new DefaultTumReader(source, calib, gamma_calib, vignette));
 }
 
 /*
@@ -245,7 +345,7 @@ DsoMapGenerator::DsoMapGenerator(const string& input_path) {
  * is disabled, gamma is set to a default value, and all frames are treated
  * as keyframes.
  */
-DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, const string& image_path, const string& cache_path) {
+DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, int width, int height, const vector<string>& image_paths, const string& cache_path) {
 	setting_desiredImmatureDensity = 1500;
 	setting_desiredPointDensity = 2000;
 	setting_minFrames = 5;
@@ -258,11 +358,11 @@ DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, const string& image_path,
 
 	disableAllDisplay = true;
 
-//	setting_debugout_runquiet = true;
+	setting_debugout_runquiet = true;
 
 	// to handle datasets other than tum monoVO, we'll need to change these
 	// paths, and change the mode and photometric calibration weights
-	source = image_path;
+	datasetReader = unique_ptr<DsoDatasetReader>(new SimpleReader(image_paths, camera_calib, width, height, cache_path));
 
 	setting_photometricCalibration = 0;
 	setting_affineOptModeA = 0;
@@ -272,22 +372,9 @@ DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, const string& image_path,
 }
 
 
-void DsoMapGenerator::initVisualOdometry() {
-	reader = unique_ptr<ImageFolderReader>(
-			new ImageFolderReader(source, calib, gammaCalib, vignette));
-	reader->setGlobalCalibration();
-
-	if (setting_photometricCalibration > 0
-			&& reader->getPhotometricGamma() == 0) {
-		printf(
-				"ERROR: don't have photometric calibation. Need to use commandline options mode=1 ");
-		exit(1);
-	}
-}
-
 void DsoMapGenerator::runVisualOdometry() {
 	vector<int> idsToPlay;
-	for (int i = 0; i < reader->getNumImages(); ++i) {
+	for (int i = 0; i < datasetReader->getNumImages(); ++i) {
 		idsToPlay.push_back(i);
 	}
 	runVisualOdometry(idsToPlay);
@@ -295,7 +382,7 @@ void DsoMapGenerator::runVisualOdometry() {
 void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
 
 	unique_ptr<FullSystem> fullSystem(new FullSystem());
-	fullSystem->setGammaFunction(reader->getPhotometricGamma());
+	fullSystem->setGammaFunction(datasetReader->getPhotometricGamma());
 	unique_ptr<DsoOutputRecorder> dso_recorder(new DsoOutputRecorder());
 	fullSystem->outputWrapper.push_back(dso_recorder.get());
 
@@ -309,7 +396,7 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
 
 		int id = ids_to_play[i];
 
-		ImageAndExposure* img = reader->getImage(id);
+		ImageAndExposure* img = datasetReader->getImage(id);
 
 		fullSystem->addActiveFrame(img, id);
 
@@ -325,7 +412,7 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
 						fullSystem->outputWrapper;
 
 				fullSystem = unique_ptr<FullSystem>(new FullSystem());
-				fullSystem->setGammaFunction(reader->getPhotometricGamma());
+				fullSystem->setGammaFunction(datasetReader->getPhotometricGamma());
 
 				for (IOWrap::Output3DWrapper* ow : wraps)
 					ow->reset();
@@ -349,18 +436,14 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
 	fullSystem->printResult("result.txt");
 
 	int numFramesProcessed = ids_to_play.size();
-	double numSecondsProcessed = fabs(
-			reader->getTimestamp(ids_to_play[0])
-					- reader->getTimestamp(ids_to_play.back()));
 	double MilliSecondsTakenSingle = 1000.0f * (ended - started)
 			/ (float) (CLOCKS_PER_SEC);
 	if (print_debug_info) {
 		printf("\n======================"
-				"\n%d Frames (recorded at %.1f fps)"
+				"\n%d Frames"
 				"\n%.2fms total"
 				"\n%.2fms per frame"
 				"\n======================\n\n", numFramesProcessed,
-				numFramesProcessed / numSecondsProcessed,
 				MilliSecondsTakenSingle,
 				MilliSecondsTakenSingle / numFramesProcessed);
 	}
@@ -565,7 +648,7 @@ void DsoMapGenerator::saveRawImages(const string& filepath) const {
 	}
 }
 
-void DsoMapGenerator::parseArgument(char* arg) {
+void DsoMapGenerator::parseArgument(char* arg, string& source, string& calib, string& gamma_calib, string& vignette) {
 	int option;
 	char buf[1000];
 
@@ -620,8 +703,8 @@ void DsoMapGenerator::parseArgument(char* arg) {
 	}
 
 	if (1 == sscanf(arg, "gamma=%s", buf)) {
-		gammaCalib = buf;
-		printf("loading gammaCalib from %s!\n", gammaCalib.c_str());
+		gamma_calib = buf;
+		printf("loading gammaCalib from %s!\n", gamma_calib.c_str());
 		return;
 	}
 
@@ -661,6 +744,10 @@ void DsoMapGenerator::parseArgument(char* arg) {
 	}
 
 	printf("could not parse argument \"%s\"!!!!\n", arg);
+}
+
+int DsoMapGenerator::getNumImages() {
+	return datasetReader->getNumImages();
 }
 
 // TODO: generate artificial data for testing

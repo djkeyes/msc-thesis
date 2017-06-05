@@ -33,6 +33,14 @@ public:
 
 typedef std::pair<dso::Vec3, float> ColoredPoint;
 
+class DsoDatasetReader {
+public:
+	virtual ~DsoDatasetReader() = default;
+	virtual float* getPhotometricGamma() = 0;
+	virtual int getNumImages() = 0;
+	virtual ImageAndExposure* getImage(int id) = 0;
+};
+
 /*
  * Generates a map representation using DSO. This is largely copied from the
  * original DSO command line interface, and accepts similar arguments.
@@ -42,9 +50,8 @@ public:
 
 	DsoMapGenerator(int argc, char** argv);
 	DsoMapGenerator(const std::string& input_path);
-	DsoMapGenerator(cv::Mat camera_calib, const std::string& image_path, const std::string& cache_path);
+	DsoMapGenerator(cv::Mat camera_calib, int width, int height, const std::vector<std::string>& image_paths, const std::string& cache_path);
 
-	void initVisualOdometry();
 	void runVisualOdometry(const std::vector<int>& indices_to_play);
 	void runVisualOdometry() override;
 	inline bool hasValidPoints() const {
@@ -59,31 +66,21 @@ public:
 	void saveRawImages(const std::string& filepath) const;
 	void savePosesInWorldFrame(const std::string& gt_filename, const std::string& output_filename) const;
 
-
-	inline ImageFolderReader& getReader() {
-		return *reader;
-	}
+	int getNumImages();
 
 private:
-	void parseArgument(char* arg);
-
-	std::string vignette = "";
-	std::string gammaCalib = "";
-	std::string source = "";
-	std::string calib = "";
+	void parseArgument(char* arg, std::string& source, std::string& calib, std::string& gamma_calib, std::string& vignette);
 
 	int mode = 0;
 
 	std::unique_ptr<std::list<ColoredPoint>> pointcloud;
-	std::unique_ptr<
-			std::map<int,
-					std::pair<dso::SE3,
-							std::unique_ptr<std::list<ColoredPoint>>> > >pointcloudsWithViewpoints;
+	std::unique_ptr<std::map<int, std::pair<dso::SE3, std::unique_ptr<std::list<ColoredPoint>>> > >pointcloudsWithViewpoints;
 	std::unique_ptr<std::map<int, std::unique_ptr<dso::MinimalImageF>>> depthImages;
 	std::unique_ptr<std::map<int, std::unique_ptr<dso::MinimalImageF>>> rgbImages;
 	std::unique_ptr<std::map<int, dso::SE3*>> poses;
 
-	std::unique_ptr<ImageFolderReader> reader;
+	std::unique_ptr<DsoDatasetReader> datasetReader;
+
 };
 
 class ArtificialMapGenerator: public MapGenerator {

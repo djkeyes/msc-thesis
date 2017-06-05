@@ -27,6 +27,26 @@ using namespace cv;
 
 bool display_top_matching_images = false;
 
+int vocabulary_size;
+double epsilon_angle_deg;
+double epsilon_translation;
+string slam_method;
+
+
+tuple<Mat, int, int> getDummyCalibration(const string& filename) {
+	int img_width, img_height;
+	Mat probe_image = imread(filename);
+	img_width = probe_image.cols;
+	img_height = probe_image.rows;
+
+	Mat K = Mat::zeros(3, 3, CV_32FC1);
+	K.at<float>(0, 0) = (img_width + img_height) / 2.;
+	K.at<float>(1, 1) = (img_width + img_height) / 2.;
+	K.at<float>(0, 2) = img_width / 2 - 0.5;
+	K.at<float>(1, 2) = img_height / 2 - 0.5;
+	K.at<float>(2, 2) = 1;
+	return make_tuple(K, img_width, img_height);
+}
 class SceneParser {
 public:
 	virtual ~SceneParser() {
@@ -75,6 +95,7 @@ public:
 				cur_db.setCachePath(cache / sequence_dir.filename());
 			}
 
+			vector<string> sorted_images;
 			for (auto file : fs::recursive_directory_iterator(sequence_dir)) {
 				string name(file.path().filename().string());
 				if (name.find(".color.png") == string::npos) {
@@ -85,12 +106,23 @@ public:
 				unique_ptr<Frame> frame(new sdl::Frame(id));
 				frame->setImagePath(file);
 				if (!cache.empty()) {
+					string image_filename(file.path().string());
 					frame->setCachePath(cache / sequence_dir.filename());
+					sorted_images.push_back(image_filename);
 				}
 
 				Query q(cur_db.db_id, frame.get());
 				queries.push_back(q);
 				cur_db.addFrame(move(frame));
+			}
+
+			sort(sorted_images.begin(), sorted_images.end());
+			if(slam_method.find("DSO") == 0) {
+				auto calib = getDummyCalibration(sorted_images[0]);
+				Mat K = get<0>(calib);
+				int width = get<1>(calib);
+				int height = get<2>(calib);
+				cur_db.setMapper(new DsoMapGenerator(K, width, height, sorted_images, cur_db.getCachePath().string()));
 			}
 		}
 	}
@@ -124,15 +156,12 @@ private:
 	fs::path cache;
 };
 
-unique_ptr<SceneParser> scene_parser;
-int vocabulary_size;
-double epsilon_angle_deg;
-double epsilon_translation;
-
 void usage(char** argv, const po::options_description commandline_args) {
 	cout << "Usage: " << argv[0] << " [options]" << endl;
 	cout << commandline_args << "\n";
 }
+
+unique_ptr<SceneParser> scene_parser;
 
 void parseArguments(int argc, char** argv) {
 	// Arguments, can be specified on commandline or in a file settings.config
@@ -193,6 +222,7 @@ void parseArguments(int argc, char** argv) {
 	vocabulary_size = vm["vocabulary_size"].as<int>();
 	epsilon_angle_deg = vm["epsilon_angle_deg"].as<double>();
 	epsilon_translation = vm["epsilon_translation"].as<double>();
+	slam_method = vm["mapping_method"].as<string>();
 
 	if (vm.count("scene")) {
 
@@ -233,6 +263,7 @@ int main(int argc, char** argv) {
 		db.setFeatureDetector(sift);
 		db.setDescriptorExtractor(sift);
 		db.setBowExtractor(makePtr<BOWSparseImgDescriptorExtractor>(sift, FlannBasedMatcher::create()));
+		db.train();
 	}
 	for (sdl::Query& query : queries) {
 		query.setFeatureDetector(sift);
@@ -240,24 +271,8 @@ int main(int argc, char** argv) {
 		query.computeFeatures();
 	}
 
-	int img_width, img_height;
-	{
-		Mat probe_image = queries[0].readColorImage();
-		img_width = probe_image.cols;
-		img_height = probe_image.rows;
-	}
 	// TODO: use an actually calibrated camera model
-	Mat K = Mat::zeros(3, 3, CV_32FC1);
-	K.at<float>(0, 0) = (img_width + img_height) / 2.;
-	K.at<float>(1, 1) = (img_width + img_height) / 2.;
-	K.at<float>(0, 2) = img_width / 2 - 0.5;
-	K.at<float>(1, 2) = img_height / 2 - 0.5;
-	K.at<float>(2, 2) = 1;
-
-	for (auto& db : dbs) {
-//		db.setMapper(unique_ptr<DsoMapGenerator>(new DsoMapGenerator(K, db.getImagePath(), db.getCachePath())));
-		db.train();
-	}
+	Mat K = get<0>(getDummyCalibration(queries[0].frame->imagePath.string()));
 
 	int num_to_return = 8;
 
@@ -454,21 +469,6 @@ int main(int argc, char** argv) {
 			<< train_loc_accuracy << endl;
 	cout << "Test set localization accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg << " deg): "
 			<< test_loc_accuracy << endl;
-
-// TODO:
-// -for each full run, compute some database info
-// -for each partial run, compute descriptors (opencv has this
-// "BOWImgDescriptorExtractor", but I guess we can't cache the output of
-// that, since the bag of words differs for each dataset
-// -for each (full run, partial run):
-// 	   get best matches
-//     count number of consensus elements
-//     TODOTODO: figure out how to evaluate match score
-// after this is in place, we can vary the following parameters:
-// -classifier (SVM? NN? idk)
-// -descriptor (SIFT? SURF? lots of stuff in opencv)
-// -distance metric
-// -score reweighting
 
 	return 0;
 }

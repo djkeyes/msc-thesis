@@ -79,9 +79,8 @@ int main(int argc, char** argv) {
 		int frames_per_segment = 300;
 		unique_ptr<DsoMapGenerator> map_gen(new DsoMapGenerator(input_path));
 
-		map_gen->initVisualOdometry();
 		int num_segments = max(1,
-				map_gen->getReader().getNumImages() / frames_per_segment);
+				map_gen->getNumImages() / frames_per_segment);
 		stringstream trajectorydir;
 		trajectorydir << setfill('0');
 		trajectorydir << output_path << "/trajectory_" << setw(5)
@@ -93,7 +92,7 @@ int main(int argc, char** argv) {
 			}
 			if (segment == num_segments - 1) {
 				for (int i = (segment + 1) * frames_per_segment;
-						i < map_gen->getReader().getNumImages(); i++) {
+						i < map_gen->getNumImages(); i++) {
 					ids_to_play.push_back(i);
 				}
 			}

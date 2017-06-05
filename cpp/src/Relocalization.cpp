@@ -468,9 +468,13 @@ void Database::train() {
 	map<int, vector<KeyPoint>> image_keypoints;
 	map<int, Mat> image_descriptors;
 
-	cout << "Mapping environment using specified SLAM system..." << endl;
-	doMapping();
-	cout << "Mapping complete." << endl;
+	if (mapGen) {
+		cout << "Mapping environment using specified SLAM system..." << endl;
+		doMapping();
+		cout << "Mapping complete." << endl;
+	} else {
+		cout << "Skipping mapping step, because not SLAM system was specified." << endl;
+	}
 
 	cout << "computing descriptors for each keyframe..." << endl;
 	int descriptor_count = computeFrameDescriptors(image_keypoints, image_descriptors);
