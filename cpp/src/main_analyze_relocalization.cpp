@@ -123,6 +123,10 @@ public:
 				int width = get<1>(calib);
 				int height = get<2>(calib);
 				cur_db.setMapper(new DsoMapGenerator(K, width, height, sorted_images, cur_db.getCachePath().string()));
+			} else if (slam_method.length() > 0) {
+				stringstream ss;
+				ss << "SevenScenesParser for slam method '" << slam_method << "' not implemented!";
+				throw runtime_error(ss.str());
 			}
 		}
 	}
@@ -145,6 +149,91 @@ public:
 		}
 
 		ifs.close();
+	}
+
+	void setCache(fs::path cache_dir) {
+		cache = cache_dir;
+	}
+
+private:
+	fs::path directory;
+	fs::path cache;
+};
+
+class TumParser: public SceneParser {
+public:
+	TumParser(const fs::path& directory) :
+			directory(directory) {
+	}
+	virtual ~TumParser() {
+	}
+	virtual void parseScene(vector<sdl::Database>& dbs, vector<sdl::Query>& queries) {
+		vector<fs::path> sequences;
+		for (auto dir : fs::recursive_directory_iterator(directory)) {
+			if (!fs::is_directory(dir)) {
+				continue;
+			}
+			// each subdirectory should be of the form "sequence_XX"
+			if (dir.path().filename().string().find("sequence") != 0) {
+				continue;
+			}
+			sequences.push_back(dir);
+		}
+		if (sequences.empty()) {
+			throw std::runtime_error("scene contained no sequences!");
+		}
+
+		// each sequence can produce 1 database and several queries
+		for (const fs::path& sequence_dir : sequences) {
+			dbs.emplace_back();
+
+			Database& cur_db = dbs.back();
+			cur_db.db_id = dbs.size() - 1;
+			if (!cache.empty()) {
+				cur_db.setCachePath(cache / sequence_dir.filename());
+			}
+
+			// assumes all the images have been unzipped to a directory images/
+			fs::path image_dir = sequence_dir / "images";
+			vector<string> sorted_images;
+			for (auto file : fs::recursive_directory_iterator(image_dir)) {
+				string name(file.path().filename().string());
+				if (name.find(".jpg") == string::npos) {
+					continue;
+				}
+				// these files are in the format XXXXX.jpg
+				int id = stoi(name.substr(0, 5));
+				unique_ptr<Frame> frame(new sdl::Frame(id));
+				frame->setImagePath(file);
+				if (!cache.empty()) {
+					string image_filename(file.path().string());
+					frame->setCachePath(cache / sequence_dir.filename());
+					sorted_images.push_back(image_filename);
+				}
+
+				Query q(cur_db.db_id, frame.get());
+				queries.push_back(q);
+				cur_db.addFrame(move(frame));
+			}
+
+			sort(sorted_images.begin(), sorted_images.end());
+			if(slam_method.find("DSO") == 0) {
+				// TODO: here we can actually provide the fancy TUM calibration
+				auto calib = getDummyCalibration(sorted_images[0]);
+				Mat K = get<0>(calib);
+				int width = get<1>(calib);
+				int height = get<2>(calib);
+				cur_db.setMapper(new DsoMapGenerator(K, width, height, sorted_images, cur_db.getCachePath().string()));
+			} else if (slam_method.length() > 0) {
+				stringstream ss;
+				ss << "TumParser for slam method '" << slam_method << "' not implemented!";
+				throw runtime_error(ss.str());
+			}
+		}
+	}
+
+	virtual void loadGroundTruthPose(const sdl::Frame& frame, Mat& rotation, Mat& translation) {
+		// TODO
 	}
 
 	void setCache(fs::path cache_dir) {
@@ -231,6 +320,13 @@ void parseArguments(int argc, char** argv) {
 		if (scene_type.find("7scenes") == 0) {
 			fs::path directory(vm["datadir"].as<string>());
 			SevenScenesParser* parser = new SevenScenesParser(directory);
+			if (!cache_dir.empty()) {
+				parser->setCache(cache_dir);
+			}
+			scene_parser = unique_ptr<SceneParser>(parser);
+		} else if (scene_type.find("tum") == 0) {
+			fs::path directory(vm["datadir"].as<string>());
+			TumParser* parser = new TumParser(directory);
 			if (!cache_dir.empty()) {
 				parser->setCache(cache_dir);
 			}
