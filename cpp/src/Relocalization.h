@@ -123,6 +123,10 @@ private:
 
 	// Utility functions used in train()
 	void doMapping();
+	boost::filesystem::path getSceneCoordinateFilename(int frame_id) const;
+	bool needToRecomputeSceneCoordinates() const;
+	void saveSceneCoordinates(int frame_id, cv::Mat coordinate_map) const;
+	cv::Mat loadSceneCoordinates(int frame_id) const;
 	int computeFrameDescriptors(
 			std::map<int, std::vector<cv::KeyPoint>>& image_keypoints,
 			std::map<int, cv::Mat>& image_descriptors);

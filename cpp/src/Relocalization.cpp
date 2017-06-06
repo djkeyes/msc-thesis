@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <Eigen/QR>
 #include <Eigen/StdVector>
@@ -111,7 +112,7 @@ struct Database::InvertedIndexImpl {
 };
 
 Database::Database() :
-		frames(new map<int, unique_ptr<Frame>>()), pInvertedIndexImpl(new Database::InvertedIndexImpl()) {
+		db_id(-1), frames(new map<int, unique_ptr<Frame>>()), pInvertedIndexImpl(new Database::InvertedIndexImpl()) {
 }
 // Need to explicitly define destructor and move constructor, otherwise
 // compiler can't handle unique_ptrs with forward-declared types.
@@ -186,7 +187,75 @@ void Database::setMapper(unique_ptr<MapGenerator> map_gen){
 }
 
 void Database::doMapping() {
+	if(!needToRecomputeSceneCoordinates()){
+		return;
+	}
+	// first run the full mapping algorithm
 	mapGen->runVisualOdometry();
+
+	// then fetch the depth maps / poses, and convert them to 2D -> 3D image maps
+	map<int, Mat> scene_coordinate_maps = mapGen->getSceneCoordinateMaps();
+
+	Size size = scene_coordinate_maps.begin()->second.size();
+	for(unsigned int frame_id = 0; frame_id < frames->size(); ++frame_id){
+		auto iter = scene_coordinate_maps.find(frame_id);
+		if (iter == scene_coordinate_maps.end()) {
+			// nan fill unknown elements
+			float nan = numeric_limits<float>::quiet_NaN();
+			cv::Mat allNaNs(size, CV_32FC3, cv::Vec3f(nan, nan, nan));
+			saveSceneCoordinates(frame_id, allNaNs);
+		} else {
+			saveSceneCoordinates(frame_id, iter->second);
+		}
+	}
+
+	// Also save a pointcloud, for debugging
+	mapGen->savePointCloudAsPcd((cachePath / "pointcloud.pcd").string());
+	mapGen->savePointCloudAsPly((cachePath / "pointcloud.ply").string());
+
+	// clear mapGen, since it hogs a bunch of memory
+	mapGen.release();
+}
+boost::filesystem::path Database::getSceneCoordinateFilename(int frame_id) const {
+	stringstream ss;
+	ss << "scene_coords_" << frame_id << ".png";
+	return cachePath / ss.str();
+}
+bool Database::needToRecomputeSceneCoordinates() const {
+	unsigned int num_saved_coords = 0;
+	for (auto file : fs::recursive_directory_iterator(cachePath)) {
+		if (file.path().filename().string().find("scene_coords") == 0) {
+			num_saved_coords++;
+		}
+	}
+	return num_saved_coords != frames->size();
+}
+void Database::saveSceneCoordinates(int frame_id, cv::Mat coordinate_map) const {
+	// Can't use imwrite/read, since that only works on CV_8BC3
+
+	assert(coordinate_map.type() == CV_32FC3);
+
+	ofstream ofs(getSceneCoordinateFilename(frame_id).string(), ios_base::out | ios_base::binary);
+
+	ofs.write((char*) &coordinate_map.rows, sizeof(uint32_t));
+	ofs.write((char*) &coordinate_map.cols, sizeof(uint32_t));
+	ofs.write((char*) coordinate_map.data, coordinate_map.rows * coordinate_map.cols * sizeof(cv::Vec3f));
+
+	ofs.close();
+}
+Mat Database::loadSceneCoordinates(int frame_id) const {
+
+	ifstream ifs(getSceneCoordinateFilename(frame_id).string(), ios_base::in | ios_base::binary);
+
+	int rows, cols;
+	ifs.read((char*) &rows, sizeof(uint32_t));
+	ifs.read((char*) &cols, sizeof(uint32_t));
+	Mat coordinate_map;
+	coordinate_map.create(rows, cols, CV_32FC3);
+	ifs.read((char*) coordinate_map.data, rows * cols * sizeof(cv::Vec3f));
+	ifs.close();
+
+	return coordinate_map;
 }
 int Database::computeFrameDescriptors(map<int, vector<KeyPoint>>& image_keypoints, map<int, Mat>& image_descriptors) {
 

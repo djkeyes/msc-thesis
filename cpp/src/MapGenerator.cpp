@@ -6,6 +6,7 @@
 #include <memory>
 #include <set>
 #include <list>
+#include <limits>
 #include <utility>
 #include <sstream>
 
@@ -126,6 +127,7 @@ struct DsoOutputRecorder: public Output3DWrapper {
 	unique_ptr<map<int, unique_ptr<MinimalImageF>>> depthImagesById;
 	unique_ptr<map<int, unique_ptr<MinimalImageF>>> rgbImagesById;
 	unique_ptr<map<int, SE3*>> posesById;
+	unique_ptr<map<int, cv::Mat>> sceneCoordinateMaps;
 
 	const double my_scaledTH = 1; //1e10;
 	const double my_absTH = 1;//1e10;
@@ -136,13 +138,19 @@ struct DsoOutputRecorder: public Output3DWrapper {
 	pointsWithViewpointsById(new map<int, pair<SE3, unique_ptr<list<ColoredPoint>>> >()),
 	depthImagesById(new map<int, unique_ptr<MinimalImageF>>()),
 	rgbImagesById(new map<int, unique_ptr<MinimalImageF>>()),
-	posesById(new map<int, SE3*>()) {
+	posesById(new map<int, SE3*>()),
+	sceneCoordinateMaps(new map<int, cv::Mat>()) {
 	}
 
 	void publishGraph(
 			const map<uint64_t, Eigen::Vector2i, less<uint64_t>,
 			Eigen::aligned_allocator<pair<uint64_t, Eigen::Vector2i> > > &connectivity)
 	override {
+		// TODO(daniel): we could check the graph connectivity here to get covisibility
+		// of keypoints. This is a little sketchy though, since DSO is a direct method,
+		// so we aren't guaranteed that keypoint k in frame i will also project to a
+		// keypoint in frame j. On the other hand, if it doesn't project to a keypoint,
+		// we could just use that as an excuse to add a new keypoint to frame j.
 	}
 
 	void printPoint(const PointHessian* const & point) {
@@ -170,6 +178,10 @@ struct DsoOutputRecorder: public Output3DWrapper {
 		double cyi = calib->cyli();
 
 		unique_ptr<list<ColoredPoint>> current_points(new list<ColoredPoint>());
+		// nan fill unknown elements
+		float nan = numeric_limits<float>::quiet_NaN();
+		cv::Mat sceneCoordMap(hG[0], wG[0], CV_32FC3, cv::Vec3f(nan, nan, nan));
+
 		for (PointHessian* point : points) {
 			double z = 1.0 / point->idepth;
 
@@ -212,13 +224,16 @@ struct DsoOutputRecorder: public Output3DWrapper {
 
 				float color = point->color[patternIdx] / 255.0;
 
-				Vec3 point(x, y, z);
+				Vec3 point3d(x, y, z);
 
-				coloredPoints->push_back(make_pair(camToWorld*point, color));
-				current_points->push_back(make_pair(point, color));
+				coloredPoints->push_back(make_pair(camToWorld*point3d, color));
+				current_points->push_back(make_pair(point3d, color));
+
+				sceneCoordMap.at<cv::Vec3f>(static_cast<int>(point->v), static_cast<int>(point->u)) = cv::Vec3f(x,y,z);
 			}
 		}
 		pointsWithViewpointsById->insert(make_pair(frame_id, make_pair(camToWorld, move(current_points))));
+		sceneCoordinateMaps->insert(make_pair(frame_id, sceneCoordMap));
 	}
 
 	void publishKeyframes(vector<FrameHessian*> &frames, bool final,
@@ -346,8 +361,12 @@ DsoMapGenerator::DsoMapGenerator(const string& input_path) {
  * as keyframes.
  */
 DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, int width, int height, const vector<string>& image_paths, const string& cache_path) {
-	setting_desiredImmatureDensity = 1500;
-	setting_desiredPointDensity = 2000;
+	setting_desiredImmatureDensity = 3000;
+	setting_desiredPointDensity = 4000;
+	// setting this higher than 1 forces more frames to be keyframes. Still, many frames
+	// are skipped for a variety of reasons. The most common is probably no camera
+	// movement / ill-conditioned depth estimation.
+	setting_kfGlobalWeight = 2;
 	setting_minFrames = 5;
 	setting_maxFrames = 7;
 	setting_maxOptIterations = 6;
@@ -388,7 +407,7 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
 
 	clock_t started = clock();
 
-	for (int i = 0; i < (int) ids_to_play.size(); i++) {
+	for (int i = 0; i < static_cast<int>(ids_to_play.size()); i++) {
 		if (!fullSystem->initialized)	// if not initialized: reset start time.
 		{
 			started = clock();
@@ -453,6 +472,7 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
 	depthImages = move(dso_recorder->depthImagesById);
 	rgbImages = move(dso_recorder->rgbImagesById);
 	poses = move(dso_recorder->posesById);
+	sceneCoordinateMaps = move(dso_recorder->sceneCoordinateMaps);
 
 	if (print_debug_info) {
 		printf("recorded %lu points!\n", pointcloud->size());
@@ -750,6 +770,11 @@ int DsoMapGenerator::getNumImages() {
 	return datasetReader->getNumImages();
 }
 
+map<int, cv::Mat> DsoMapGenerator::getSceneCoordinateMaps() {
+	// returns a copy
+	return *sceneCoordinateMaps;
+}
+
 // TODO: generate artificial data for testing
 ArtificialMapGenerator::ArtificialMapGenerator() {
 }
@@ -763,5 +788,7 @@ void ArtificialMapGenerator::savePointCloudAsManyPcds(const string& filepath) {
 }
 void ArtificialMapGenerator::saveDepthMaps(const string& filepath) {
 }
-
+map<int, cv::Mat> ArtificialMapGenerator::getSceneCoordinateMaps() {
+	return map<int, cv::Mat>();
+}
 }

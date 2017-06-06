@@ -29,6 +29,8 @@ public:
 	virtual void savePointCloudAsPcd(const std::string& filename) = 0;
 	virtual void savePointCloudAsManyPcds(const std::string& filepath) = 0;
 	virtual void saveDepthMaps(const std::string& filepath) = 0;
+
+	virtual std::map<int, cv::Mat> getSceneCoordinateMaps() = 0;
 };
 
 typedef std::pair<dso::Vec3, float> ColoredPoint;
@@ -68,6 +70,8 @@ public:
 
 	int getNumImages();
 
+	std::map<int, cv::Mat> getSceneCoordinateMaps() override;
+
 private:
 	void parseArgument(char* arg, std::string& source, std::string& calib, std::string& gamma_calib, std::string& vignette);
 
@@ -78,6 +82,7 @@ private:
 	std::unique_ptr<std::map<int, std::unique_ptr<dso::MinimalImageF>>> depthImages;
 	std::unique_ptr<std::map<int, std::unique_ptr<dso::MinimalImageF>>> rgbImages;
 	std::unique_ptr<std::map<int, dso::SE3*>> poses;
+	std::unique_ptr<std::map<int, cv::Mat>> sceneCoordinateMaps;
 
 	std::unique_ptr<DsoDatasetReader> datasetReader;
 
@@ -92,6 +97,8 @@ public:
 	void savePointCloudAsPcd(const std::string& filename) override;
 	void savePointCloudAsManyPcds(const std::string& filepath) override;
 	void saveDepthMaps(const std::string& filepath) override;
+
+	std::map<int, cv::Mat> getSceneCoordinateMaps() override;
 };
 
 }
