@@ -218,12 +218,7 @@ public:
 
 			sort(sorted_images.begin(), sorted_images.end());
 			if(slam_method.find("DSO") == 0) {
-				// TODO: here we can actually provide the fancy TUM calibration
-				auto calib = getDummyCalibration(sorted_images[0]);
-				Mat K = get<0>(calib);
-				int width = get<1>(calib);
-				int height = get<2>(calib);
-				cur_db.setMapper(new DsoMapGenerator(K, width, height, sorted_images, cur_db.getCachePath().string()));
+				cur_db.setMapper(new DsoMapGenerator(sequence_dir.string()));
 			} else if (slam_method.length() > 0) {
 				stringstream ss;
 				ss << "TumParser for slam method '" << slam_method << "' not implemented!";
@@ -234,6 +229,7 @@ public:
 
 	virtual void loadGroundTruthPose(const sdl::Frame& frame, Mat& rotation, Mat& translation) {
 		// TODO
+		throw runtime_error("loadGroundTruthPose(const Frame&, Mat&, Mat&) not implemented!");
 	}
 
 	void setCache(fs::path cache_dir) {

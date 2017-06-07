@@ -235,7 +235,10 @@ void Database::saveSceneCoordinates(int frame_id, cv::Mat coordinate_map) const 
 
 	assert(coordinate_map.type() == CV_32FC3);
 
-	ofstream ofs(getSceneCoordinateFilename(frame_id).string(), ios_base::out | ios_base::binary);
+	fs::path filename(getSceneCoordinateFilename(frame_id).string());
+	fs::create_directories(filename.parent_path());
+
+	ofstream ofs(filename.string(), ios_base::out | ios_base::binary);
 
 	ofs.write((char*) &coordinate_map.rows, sizeof(uint32_t));
 	ofs.write((char*) &coordinate_map.cols, sizeof(uint32_t));
@@ -452,6 +455,8 @@ void Database::saveInvertedIndex(const InvertedIndexImpl& inverted_index_impl) c
 	}
 
 	fs::path filename(getInvertedIndexFilename());
+	fs::create_directories(filename.parent_path());
+
 	fs::path weights_filename(getInvertedIndexWeightsFilename());
 
 	inverted_index_impl.invertedIndex.SaveInvertedIndex(filename.string());
@@ -533,6 +538,9 @@ void Database::buildInvertedIndex(const map<int, vector<KeyPoint>>& image_keypoi
 
 }
 void Database::train() {
+
+	// create cache dir if it doesn't already exist
+	fs::create_directories(cachePath);
 
 	map<int, vector<KeyPoint>> image_keypoints;
 	map<int, Mat> image_descriptors;

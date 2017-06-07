@@ -96,6 +96,7 @@ public:
 private:
 
 	void createUndistorterFromTmpFile(cv::Mat K, int width, int height, const string& tmp_file) {
+
 		ofstream ofs(tmp_file);
 		cv::Mat K_;
 		K.convertTo(K_, CV_64F);
@@ -329,8 +330,8 @@ DsoMapGenerator::DsoMapGenerator(int argc, char** argv) {
 			new DefaultTumReader(source, calib, gamma_calib, vignette));
 }
 DsoMapGenerator::DsoMapGenerator(const string& input_path) {
-	setting_desiredImmatureDensity = 1500;
-	setting_desiredPointDensity = 2000;
+	setting_desiredImmatureDensity = 3000;
+	setting_desiredPointDensity = 4000;
 	setting_minFrames = 5;
 	setting_maxFrames = 7;
 	setting_maxOptIterations = 6;
@@ -344,7 +345,7 @@ DsoMapGenerator::DsoMapGenerator(const string& input_path) {
 
 	// to handle datasets other than tum monoVO, we'll need to change these
 	// paths, and change the mode and photometric calibration weights
-	string source = input_path + "/images.zip";
+	string source = input_path + "/images/";
 	string calib = input_path + "/camera.txt";
 	string gamma_calib = input_path + "/pcalib.txt";
 	string vignette = input_path + "/vignette.png";
