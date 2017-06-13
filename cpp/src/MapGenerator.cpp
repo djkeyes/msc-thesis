@@ -128,7 +128,7 @@ struct DsoOutputRecorder: public Output3DWrapper {
 	unique_ptr<map<int, unique_ptr<MinimalImageF>>> depthImagesById;
 	unique_ptr<map<int, unique_ptr<MinimalImageF>>> rgbImagesById;
 	unique_ptr<map<int, SE3*>> posesById;
-	unique_ptr<map<int, cv::Mat>> sceneCoordinateMaps;
+	unique_ptr<map<int, cv::SparseMat>> sceneCoordinateMaps;
 
 	const double my_scaledTH = 1; //1e10;
 	const double my_absTH = 1;//1e10;
@@ -140,7 +140,7 @@ struct DsoOutputRecorder: public Output3DWrapper {
 	depthImagesById(new map<int, unique_ptr<MinimalImageF>>()),
 	rgbImagesById(new map<int, unique_ptr<MinimalImageF>>()),
 	posesById(new map<int, SE3*>()),
-	sceneCoordinateMaps(new map<int, cv::Mat>()) {
+	sceneCoordinateMaps(new map<int, cv::SparseMat>()) {
 	}
 
 	void publishGraph(
@@ -179,9 +179,9 @@ struct DsoOutputRecorder: public Output3DWrapper {
 		double cyi = calib->cyli();
 
 		unique_ptr<list<ColoredPoint>> current_points(new list<ColoredPoint>());
-		// nan fill unknown elements
-		float nan = numeric_limits<float>::quiet_NaN();
-		cv::Mat sceneCoordMap(hG[0], wG[0], CV_32FC3, cv::Vec3f(nan, nan, nan));
+		int dims[] = {hG[0], wG[0]};
+		cv::SparseMat sceneCoordMap;
+		sceneCoordMap.create(2, dims,  CV_32FC3);
 
 		for (PointHessian* point : points) {
 			double z = 1.0 / point->idepth;
@@ -230,7 +230,7 @@ struct DsoOutputRecorder: public Output3DWrapper {
 				coloredPoints->push_back(make_pair(camToWorld*point3d, color));
 				current_points->push_back(make_pair(point3d, color));
 
-				sceneCoordMap.at<cv::Vec3f>(static_cast<int>(point->v), static_cast<int>(point->u)) = cv::Vec3f(x,y,z);
+				sceneCoordMap.ref<cv::Vec3f>(static_cast<int>(point->v), static_cast<int>(point->u)) = cv::Vec3f(x,y,z);
 			}
 		}
 		pointsWithViewpointsById->insert(make_pair(frame_id, make_pair(camToWorld, move(current_points))));
@@ -771,25 +771,9 @@ int DsoMapGenerator::getNumImages() {
 	return datasetReader->getNumImages();
 }
 
-map<int, cv::Mat> DsoMapGenerator::getSceneCoordinateMaps() {
+map<int, cv::SparseMat> DsoMapGenerator::getSceneCoordinateMaps() {
 	// returns a copy
 	return *sceneCoordinateMaps;
 }
 
-// TODO: generate artificial data for testing
-ArtificialMapGenerator::ArtificialMapGenerator() {
-}
-void ArtificialMapGenerator::runVisualOdometry() {
-}
-void ArtificialMapGenerator::savePointCloudAsPly(const string& filename) {
-}
-void ArtificialMapGenerator::savePointCloudAsPcd(const string& filename) {
-}
-void ArtificialMapGenerator::savePointCloudAsManyPcds(const string& filepath) {
-}
-void ArtificialMapGenerator::saveDepthMaps(const string& filepath) {
-}
-map<int, cv::Mat> ArtificialMapGenerator::getSceneCoordinateMaps() {
-	return map<int, cv::Mat>();
-}
 }

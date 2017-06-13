@@ -30,7 +30,7 @@ public:
 	virtual void savePointCloudAsManyPcds(const std::string& filepath) = 0;
 	virtual void saveDepthMaps(const std::string& filepath) = 0;
 
-	virtual std::map<int, cv::Mat> getSceneCoordinateMaps() = 0;
+	virtual std::map<int, cv::SparseMat> getSceneCoordinateMaps() = 0;
 };
 
 typedef std::pair<dso::Vec3, float> ColoredPoint;
@@ -70,7 +70,7 @@ public:
 
 	int getNumImages();
 
-	std::map<int, cv::Mat> getSceneCoordinateMaps() override;
+	std::map<int, cv::SparseMat> getSceneCoordinateMaps() override;
 
 private:
 	void parseArgument(char* arg, std::string& source, std::string& calib, std::string& gamma_calib, std::string& vignette);
@@ -82,23 +82,10 @@ private:
 	std::unique_ptr<std::map<int, std::unique_ptr<dso::MinimalImageF>>> depthImages;
 	std::unique_ptr<std::map<int, std::unique_ptr<dso::MinimalImageF>>> rgbImages;
 	std::unique_ptr<std::map<int, dso::SE3*>> poses;
-	std::unique_ptr<std::map<int, cv::Mat>> sceneCoordinateMaps;
+	std::unique_ptr<std::map<int, cv::SparseMat>> sceneCoordinateMaps;
 
 	std::unique_ptr<DsoDatasetReader> datasetReader;
 
-};
-
-class ArtificialMapGenerator: public MapGenerator {
-public:
-	ArtificialMapGenerator();
-
-	void runVisualOdometry() override;
-	void savePointCloudAsPly(const std::string& filename) override;
-	void savePointCloudAsPcd(const std::string& filename) override;
-	void savePointCloudAsManyPcds(const std::string& filepath) override;
-	void saveDepthMaps(const std::string& filepath) override;
-
-	std::map<int, cv::Mat> getSceneCoordinateMaps() override;
 };
 
 }

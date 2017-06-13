@@ -7,7 +7,6 @@
 
 using sdl::MapGenerator;
 using sdl::DsoMapGenerator;
-using sdl::ArtificialMapGenerator;
 
 using std::shared_ptr;
 using std::printf;
@@ -43,8 +42,6 @@ int main(int argc, char** argv) {
 		map_gen = shared_ptr<MapGenerator>(
 				new DsoMapGenerator(argc - num_required_args,
 						argv + num_required_args));
-	} else if (strcmp(argv[1], "simulated") == 0) {
-		map_gen = shared_ptr<MapGenerator>(new ArtificialMapGenerator());
 	} else {
 		usage();
 		return 0;

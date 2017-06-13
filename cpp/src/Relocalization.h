@@ -125,9 +125,9 @@ private:
 	void doMapping();
 	boost::filesystem::path getSceneCoordinateFilename(int frame_id) const;
 	bool needToRecomputeSceneCoordinates() const;
-	void saveSceneCoordinates(int frame_id, cv::Mat coordinate_map) const;
-	cv::Mat loadSceneCoordinates(int frame_id) const;
-	int computeFrameDescriptors(
+	void saveSceneCoordinates(int frame_id, cv::SparseMat coordinate_map) const;
+	cv::SparseMat loadSceneCoordinates(int frame_id) const;
+	int computeDescriptorsForEachFrame(
 			std::map<int, std::vector<cv::KeyPoint>>& image_keypoints,
 			std::map<int, cv::Mat>& image_descriptors);
 	void doClustering(const std::map<int, cv::Mat>& image_descriptors);

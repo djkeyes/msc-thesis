@@ -263,8 +263,8 @@ void parseArguments(int argc, char** argv) {
 			("vocabulary_size", po::value<int>()->default_value(100000), "Size of the visual vocabulary.")
 			("cache", po::value<string>()->default_value(""), "Directory to cache intermediate results, ie"
 					" descriptors or visual vocabulary, between runs.")
-			("epsilon_angle_deg", po::value<double>(), "Angle in degrees for a pose to be considered accurate.")
-			("epsilon_translation", po::value<double>(), "Distance in the scene coordinate system for a pose"
+			("epsilon_angle_deg", po::value<double>()->default_value(5), "Angle in degrees for a pose to be considered accurate.")
+			("epsilon_translation", po::value<double>()->default_value(0.05), "Distance in the scene coordinate system for a pose"
 					" to be considered accurate.")
 			("mapping_method", po::value<string>()->default_value(""), "Mapping/SLAM method for building a map"
 					" to relocalize against. Can be 'DSO' or left empty.");

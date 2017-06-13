@@ -194,16 +194,15 @@ void Database::doMapping() {
 	mapGen->runVisualOdometry();
 
 	// then fetch the depth maps / poses, and convert them to 2D -> 3D image maps
-	map<int, Mat> scene_coordinate_maps = mapGen->getSceneCoordinateMaps();
+	map<int, cv::SparseMat> scene_coordinate_maps = mapGen->getSceneCoordinateMaps();
 
-	Size size = scene_coordinate_maps.begin()->second.size();
-	for(unsigned int frame_id = 0; frame_id < frames->size(); ++frame_id){
+	const int* dims = scene_coordinate_maps.begin()->second.size();
+	for (unsigned int frame_id = 0; frame_id < frames->size(); ++frame_id) {
 		auto iter = scene_coordinate_maps.find(frame_id);
 		if (iter == scene_coordinate_maps.end()) {
-			// nan fill unknown elements
-			float nan = numeric_limits<float>::quiet_NaN();
-			cv::Mat allNaNs(size, CV_32FC3, cv::Vec3f(nan, nan, nan));
-			saveSceneCoordinates(frame_id, allNaNs);
+			cv::SparseMat empty;
+			empty.create(2, dims, CV_32FC3);
+			saveSceneCoordinates(frame_id, empty);
 		} else {
 			saveSceneCoordinates(frame_id, iter->second);
 		}
@@ -230,8 +229,8 @@ bool Database::needToRecomputeSceneCoordinates() const {
 	}
 	return num_saved_coords != frames->size();
 }
-void Database::saveSceneCoordinates(int frame_id, cv::Mat coordinate_map) const {
-	// Can't use imwrite/read, since that only works on CV_8BC3
+void Database::saveSceneCoordinates(int frame_id, cv::SparseMat coordinate_map) const {
+	// Can't use imwrite/read, since that only works on cv::mat of type CV_8BC3
 
 	assert(coordinate_map.type() == CV_32FC3);
 
@@ -240,27 +239,47 @@ void Database::saveSceneCoordinates(int frame_id, cv::Mat coordinate_map) const 
 
 	ofstream ofs(filename.string(), ios_base::out | ios_base::binary);
 
-	ofs.write((char*) &coordinate_map.rows, sizeof(uint32_t));
-	ofs.write((char*) &coordinate_map.cols, sizeof(uint32_t));
-	ofs.write((char*) coordinate_map.data, coordinate_map.rows * coordinate_map.cols * sizeof(cv::Vec3f));
+	uint32_t rows = coordinate_map.size(0);
+	uint32_t cols = coordinate_map.size(1);
+	uint32_t size = coordinate_map.nzcount();
+	ofs.write((char*) &rows, sizeof(uint32_t));
+	ofs.write((char*) &cols, sizeof(uint32_t));
+	ofs.write((char*) &size, sizeof(uint32_t));
+	for (auto iter = coordinate_map.begin(); iter != coordinate_map.end(); ++iter) {
+		cv::Vec3f& val = iter.value<cv::Vec3f>();
+		uint16_t row = iter.node()->idx[0];
+		uint16_t col = iter.node()->idx[1];
+		ofs.write((char*) &row, sizeof(uint16_t));
+		ofs.write((char*) &col, sizeof(uint16_t));
+		ofs.write((char*) &val, sizeof(cv::Vec3f));
+	}
 
 	ofs.close();
 }
-Mat Database::loadSceneCoordinates(int frame_id) const {
+cv::SparseMat Database::loadSceneCoordinates(int frame_id) const {
 
 	ifstream ifs(getSceneCoordinateFilename(frame_id).string(), ios_base::in | ios_base::binary);
 
-	int rows, cols;
+	uint32_t rows, cols, size;
 	ifs.read((char*) &rows, sizeof(uint32_t));
 	ifs.read((char*) &cols, sizeof(uint32_t));
-	Mat coordinate_map;
-	coordinate_map.create(rows, cols, CV_32FC3);
-	ifs.read((char*) coordinate_map.data, rows * cols * sizeof(cv::Vec3f));
+	ifs.read((char*) &size, sizeof(uint32_t));
+	cv::SparseMat coordinate_map;
+	int dims[] = { static_cast<int>(rows), static_cast<int>(cols) };
+	coordinate_map.create(2, dims, CV_32FC3);
+	for (int i = 0; i < static_cast<int>(size); ++i) {
+		uint16_t row, col;
+		ifs.read((char*) &row, sizeof(uint16_t));
+		ifs.read((char*) &col, sizeof(uint16_t));
+		cv::Vec3f val;
+		ifs.read((char*) &val, sizeof(cv::Vec3f));
+		coordinate_map.ref<cv::Vec3f>(static_cast<int>(row), static_cast<int>(col)) = val;
+	}
 	ifs.close();
 
 	return coordinate_map;
 }
-int Database::computeFrameDescriptors(map<int, vector<KeyPoint>>& image_keypoints, map<int, Mat>& image_descriptors) {
+int Database::computeDescriptorsForEachFrame(map<int, vector<KeyPoint>>& image_keypoints, map<int, Mat>& image_descriptors) {
 
 	int total_descriptors = 0;
 
@@ -554,7 +573,7 @@ void Database::train() {
 	}
 
 	cout << "computing descriptors for each keyframe..." << endl;
-	int descriptor_count = computeFrameDescriptors(image_keypoints, image_descriptors);
+	int descriptor_count = computeDescriptorsForEachFrame(image_keypoints, image_descriptors);
 	cout << "computed " << descriptor_count << " descriptors in " << frames->size() << " frames." << endl;
 
 	cout << "Training vocabulary..." << endl;
