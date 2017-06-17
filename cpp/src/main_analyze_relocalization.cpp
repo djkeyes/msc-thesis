@@ -255,7 +255,7 @@ public:
 			const vector<Point2f>& database_pts) {
 		int num_inliers;
 		Mat R, t;
-		internalDoMatching(q, top_result, query_pts, database_pts, num_inliers, R, t);
+		internalDoMatching(query_pts, database_pts, num_inliers, R, t);
 
 		updateResults(q, top_result, same_database, num_inliers, R, t);
 	}
@@ -266,6 +266,7 @@ public:
 
 	void updateResults(const Query& q, const Result& top_result, bool same_database, int num_inliers, Mat R, Mat t) {
 
+		// should this threshold be a function of the ransac model DOF?
 		if (num_inliers >= 12) {
 			if (same_database) {
 				high_inlier_train_queries++;
@@ -280,7 +281,12 @@ public:
 		scene_parser->loadGroundTruthPose(*q.frame, query_R_gt, query_t_gt);
 
 		// This is only known up to scale. So cheat by fixing the scale to the ground truth.
-		t *= norm(db_t_gt - query_t_gt) / norm(t);
+		if (!needs3dDatabasePoints() && !needs3dQueryPoints()) {
+			cout << "cheating!" << endl;
+			t *= norm(db_t_gt - query_t_gt) / norm(t);
+		} else {
+			cout << "not cheating!" << endl;
+		}
 
 		Mat estimated_R = db_R_gt * R;
 		Mat estimated_t = db_R_gt * t + db_t_gt;
@@ -325,14 +331,14 @@ public:
 	unsigned int high_inlier_train_queries = 0;
 
 protected:
-	virtual void internalDoMatching(const Query& q, const Result& top_result, const vector<Point2f>& query_pts,
-			const vector<Point2f>& database_pts, int& num_inliers, Mat R, Mat t) = 0;
+	virtual void internalDoMatching(const vector<Point2f>& query_pts, const vector<Point2f>& database_pts,
+			int& num_inliers, Mat R, Mat t) = 0;
 
 	Mat K;
 };
 
 // Match between images and compute homography
-class Match_2d_2d_5point : public MatchingMethod {
+class Match_2d_2d_5point: public MatchingMethod {
 
 	bool needs3dDatabasePoints() override {
 		return false;
@@ -341,8 +347,8 @@ class Match_2d_2d_5point : public MatchingMethod {
 		return false;
 	}
 
-	void internalDoMatching(const Query& q, const Result& top_result, const vector<Point2f>& query_pts,
-			const vector<Point2f>& database_pts, int& num_inliers, Mat R, Mat t) override {
+	void internalDoMatching(const vector<Point2f>& query_pts, const vector<Point2f>& database_pts, int& num_inliers,
+			Mat R, Mat t) override {
 		int ransac_threshold = 3; // in pixels, for the sampson error
 		// TODO: the number of inliers registered for trainset images is
 		// extremely low. Perhaps they are coplanar or otherwise
@@ -374,16 +380,28 @@ class Match_2d_3d_dlt: public MatchingMethod {
 		return false;
 	}
 
-	void internalDoMatching(const Query& q, const Result& top_result, const vector<Point2f>& query_pts,
-			const vector<Point2f>& database_pts, int& num_inliers, Mat R, Mat t) {
-		throw runtime_error("DLT not yet implemented!");
+	void internalDoMatching(const vector<Point2f>& query_pts, const vector<Point2f>& database_pts, int& num_inliers,
+			Mat R, Mat t) override {
+
+		int num_iters = 1000;
+		double confidence = 0.999999;
+		double ransac_threshold = 8.0;
+
+		Mat rvec, inlier_mask;
+		solvePnPRansac(database_pts, query_pts, K, noArray(), rvec, t, false, num_iters, ransac_threshold, confidence,
+				inlier_mask);
+		Rodrigues(rvec, R);
+		num_inliers = countNonZero(inlier_mask);
+
+		// Convert from project matrix parameters (world to camera) to camera pose (camera to world)
+		R = R.t();
+		t = -R * t;
 	}
 };
 // TODO: direct 3D-3D matching using depth maps? Or 3D-2D matching using a
 // prioritized search, as in Sattler et al. 2011?
 
 unique_ptr<MatchingMethod> matching_method;
-
 
 void usage(char** argv, const po::options_description commandline_args) {
 	cout << "Usage: " << argv[0] << " [options]" << endl;
