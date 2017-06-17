@@ -62,7 +62,7 @@ public:
 	Query(const unsigned int parent_database_id, const Frame * const frame);
 
 	void computeFeatures();
-	void setFeatureDetector(cv::Ptr<cv::FeatureDetector> feature_detector);
+	void setupFeatureDetector(bool detect_from_depth_map);
 	void setDescriptorExtractor(cv::Ptr<cv::DescriptorExtractor> descriptor_extractor);
 	const cv::Mat readColorImage() const;
 	const std::vector<cv::KeyPoint>& getKeypoints() const;
@@ -73,7 +73,7 @@ public:
 private:
 
 
-	cv::Ptr<cv::FeatureDetector> featureDetector;
+	bool detectFromDepthMaps;
 	cv::Ptr<cv::DescriptorExtractor> descriptorExtractor;
 	std::vector<cv::KeyPoint> keypoints;
 	cv::Mat descriptors;
@@ -94,7 +94,7 @@ public:
 		vocabulary_size = size;
 	}
 	void setMapper(std::unique_ptr<MapGenerator> map_gen);
-	void setFeatureDetector(cv::Ptr<cv::FeatureDetector> feature_detector);
+	void setupFeatureDetector(bool detect_from_depth_maps);
 	void setDescriptorExtractor(
 			cv::Ptr<cv::DescriptorExtractor> descriptor_extractor);
 	void setBowExtractor(
@@ -152,7 +152,7 @@ private:
 	std::unique_ptr<MapGenerator> mapGen;
 
 	cv::Ptr<cv::DescriptorExtractor> descriptorExtractor;
-	cv::Ptr<cv::FeatureDetector> featureDetector;
+	bool detectFromDepthMaps;
 
 	cv::Mat vocabulary;
 	cv::Ptr<cv::BOWSparseImgDescriptorExtractor> bowExtractor;
@@ -160,6 +160,13 @@ private:
 	std::unique_ptr<std::map<int, std::unique_ptr<Frame>>>frames;
 
 	std::unique_ptr<InvertedIndexImpl> pInvertedIndexImpl;
+};
+
+/*
+ * Feature detector that allows users to specify a pre-selected list of keypoints.
+ */
+class PassThroughFeatureDetector: public cv::FeatureDetector {
+
 };
 
 }

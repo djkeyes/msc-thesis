@@ -112,7 +112,8 @@ struct Database::InvertedIndexImpl {
 };
 
 Database::Database() :
-		db_id(-1), frames(new map<int, unique_ptr<Frame>>()), pInvertedIndexImpl(new Database::InvertedIndexImpl()) {
+		db_id(-1), detectFromDepthMaps(false), frames(new map<int, unique_ptr<Frame>>()), pInvertedIndexImpl(
+				new Database::InvertedIndexImpl()) {
 }
 // Need to explicitly define destructor and move constructor, otherwise
 // compiler can't handle unique_ptrs with forward-declared types.
@@ -172,8 +173,8 @@ vector<Result> Database::lookup(const Query& query, unsigned int num_to_return) 
 	return results;
 }
 
-void Database::setFeatureDetector(Ptr<FeatureDetector> feature_detector) {
-	featureDetector = feature_detector;
+void Database::setupFeatureDetector(bool detect_from_depth_maps) {
+	detectFromDepthMaps = detect_from_depth_maps;
 }
 
 void Database::setDescriptorExtractor(Ptr<DescriptorExtractor> descriptor_extractor) {
@@ -293,7 +294,21 @@ int Database::computeDescriptorsForEachFrame(map<int, vector<KeyPoint>>& image_k
 
 		// this can be quite slow, so reload a cached copy from disk if it's available
 		if (!frame->loadDescriptors(image_keypoints[frame->index], image_descriptors[frame->index])) {
-			featureDetector->detect(colorImage, image_keypoints[frame->index]);
+			if(detectFromDepthMaps){
+				// careful: if we're only using keypoints detected by visual
+				// odometry, some frames may have 0 keypoints (ie due to dropped
+				// frames or mapping failure (even if it recovered in later frames))
+				SparseMat scene_coords = loadSceneCoordinates(frame->index);
+				for(auto iter=scene_coords.begin(); iter != scene_coords.end(); ++iter){
+					int y = iter.node()->idx[0];
+					int x = iter.node()->idx[1];
+					// TODO: should we randomize the size here, to get scale-invariant descriptors?
+					image_keypoints[frame->index].push_back(KeyPoint(x, y, 1));
+				}
+			} else {
+				// hopefully the descriptor extractor also has a keypoint detector implemented
+				descriptorExtractor->detect(colorImage, image_keypoints[frame->index]);
+			}
 			descriptorExtractor->compute(colorImage, image_keypoints[frame->index], image_descriptors[frame->index]);
 			frame->saveDescriptors(image_keypoints[frame->index], image_descriptors[frame->index]);
 		}
@@ -642,14 +657,20 @@ void Database::saveVocabulary(const cv::Mat& vocabulary) const {
 }
 
 Query::Query(const unsigned int parent_database_id, const Frame * const frame) :
-		parent_database_id(parent_database_id), frame(frame) {
+		parent_database_id(parent_database_id), frame(frame), detectFromDepthMaps(false) {
 }
 
 void Query::computeFeatures() {
 	if (!frame->loadDescriptors(keypoints, descriptors)) {
 		Mat colorImage = imread(frame->imagePath.string());
 
-		featureDetector->detect(colorImage, keypoints);
+		if (detectFromDepthMaps) {
+			throw runtime_error("computeFeatures() for query with 3D points "
+					"not yet implemented! Need to look up the associated "
+					"database and call loadSceneCoordinates().");
+		} else {
+			descriptorExtractor->detect(colorImage, keypoints);
+		}
 		descriptorExtractor->compute(colorImage, keypoints, descriptors);
 		frame->saveDescriptors(keypoints, descriptors);
 	}
@@ -657,8 +678,9 @@ void Query::computeFeatures() {
 void Query::setDescriptorExtractor(Ptr<DescriptorExtractor> descriptor_extractor) {
 	descriptorExtractor = descriptor_extractor;
 }
-void Query::setFeatureDetector(Ptr<FeatureDetector> feature_detector) {
-	featureDetector = feature_detector;
+
+void Query::setupFeatureDetector(bool detect_from_depth_maps) {
+	detectFromDepthMaps = detect_from_depth_maps;
 }
 
 const Mat Query::readColorImage() const {

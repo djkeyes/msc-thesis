@@ -32,7 +32,6 @@ double epsilon_angle_deg;
 double epsilon_translation;
 string slam_method;
 
-
 tuple<Mat, int, int> getDummyCalibration(const string& filename) {
 	int img_width, img_height;
 	Mat probe_image = imread(filename);
@@ -128,6 +127,7 @@ public:
 				ss << "SevenScenesParser for slam method '" << slam_method << "' not implemented!";
 				throw runtime_error(ss.str());
 			}
+
 		}
 	}
 
@@ -241,12 +241,154 @@ private:
 	fs::path cache;
 };
 
+unique_ptr<SceneParser> scene_parser;
+
+
+class MatchingMethod {
+public:
+	virtual ~MatchingMethod() = default;
+
+	virtual bool needs3dDatabasePoints() = 0;
+	virtual bool needs3dQueryPoints() = 0;
+
+	void doMatching(const Query& q, const Result& top_result, bool same_database, const vector<Point2f>& query_pts,
+			const vector<Point2f>& database_pts) {
+		int num_inliers;
+		Mat R, t;
+		internalDoMatching(q, top_result, query_pts, database_pts, num_inliers, R, t);
+
+		updateResults(q, top_result, same_database, num_inliers, R, t);
+	}
+
+	void setK(Mat K_) {
+		K = K_;
+	}
+
+	void updateResults(const Query& q, const Result& top_result, bool same_database, int num_inliers, Mat R, Mat t) {
+
+		if (num_inliers >= 12) {
+			if (same_database) {
+				high_inlier_train_queries++;
+			} else {
+				high_inlier_test_queries++;
+			}
+		}
+
+		Mat db_R_gt, db_t_gt;
+		scene_parser->loadGroundTruthPose(top_result.frame, db_R_gt, db_t_gt);
+		Mat query_R_gt, query_t_gt;
+		scene_parser->loadGroundTruthPose(*q.frame, query_R_gt, query_t_gt);
+
+		// This is only known up to scale. So cheat by fixing the scale to the ground truth.
+		t *= norm(db_t_gt - query_t_gt) / norm(t);
+
+		Mat estimated_R = db_R_gt * R;
+		Mat estimated_t = db_R_gt * t + db_t_gt;
+
+		double translation_error = norm(query_t_gt, estimated_t);
+		// compute angle between rotation matrices
+		Mat rotation_diff = (query_R_gt * estimated_R.t());
+		// if v is the unit vector in direction x, we want acos(v dot Rv) = acos(R_00)
+		float angle_error_rad = acos(rotation_diff.at<double>(0, 0));
+		float angle_error_deg = (180. * angle_error_rad / M_PI);
+
+		if ((translation_error < epsilon_translation) && (angle_error_deg < epsilon_angle_deg)) {
+			if (same_database) {
+				epsilon_accurate_train_queries++;
+			} else {
+				epsilon_accurate_test_queries++;
+			}
+		}
+	}
+
+	void printResults(int total_train_queries, int total_test_queries) {
+		double train_reg_accuracy = static_cast<double>(high_inlier_train_queries) / total_train_queries;
+		double test_reg_accuracy = static_cast<double>(high_inlier_test_queries) / total_test_queries;
+		double train_loc_accuracy = static_cast<double>(epsilon_accurate_train_queries) / total_train_queries;
+		double test_loc_accuracy = static_cast<double>(epsilon_accurate_test_queries) / total_test_queries;
+
+		cout << endl;
+		cout << "Processed " << (total_test_queries + total_train_queries) << " queries! (" << total_train_queries
+				<< " queries on their own train set database, and " << total_test_queries
+				<< " on separate test set databases)" << endl;
+		cout << "Train set registration accuracy (num inliers after pose recovery >= 12): " << train_reg_accuracy << endl;
+		cout << "Test set registration accuracy (num inliers after pose recovery >= 12): " << test_reg_accuracy << endl;
+		cout << "Train set localization accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg << " deg): "
+				<< train_loc_accuracy << endl;
+		cout << "Test set localization accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg << " deg): "
+				<< test_loc_accuracy << endl;
+	}
+
+	unsigned int epsilon_accurate_test_queries = 0;
+	unsigned int high_inlier_test_queries = 0;
+	unsigned int epsilon_accurate_train_queries = 0;
+	unsigned int high_inlier_train_queries = 0;
+
+protected:
+	virtual void internalDoMatching(const Query& q, const Result& top_result, const vector<Point2f>& query_pts,
+			const vector<Point2f>& database_pts, int& num_inliers, Mat R, Mat t) = 0;
+
+	Mat K;
+};
+
+// Match between images and compute homography
+class Match_2d_2d_5point : public MatchingMethod {
+
+	bool needs3dDatabasePoints() override {
+		return false;
+	}
+	bool needs3dQueryPoints() override {
+		return false;
+	}
+
+	void internalDoMatching(const Query& q, const Result& top_result, const vector<Point2f>& query_pts,
+			const vector<Point2f>& database_pts, int& num_inliers, Mat R, Mat t) override {
+		int ransac_threshold = 3; // in pixels, for the sampson error
+		// TODO: the number of inliers registered for trainset images is
+		// extremely low. Perhaps they are coplanar or otherwise
+		// ill-conditioned? Setting confidence to 1 forces RANSAC to use
+		// its default maximum number of iterations (1000), but it would
+		// be better to filter the data, or increase the max number of
+		// trials.
+		double confidence = 0.999999;
+
+		// pretty sure this is the correct order
+		Mat inlier_mask;
+		Mat E = findEssentialMat(database_pts, query_pts, K, RANSAC, confidence, ransac_threshold, inlier_mask);
+		num_inliers = recoverPose(E, database_pts, query_pts, K, R, t, inlier_mask);
+		// watch out: E, R, & t are double precision (even though we only ever passed floats)
+
+		// Convert from project matrix parameters (world to camera) to camera pose (camera to world)
+		R = R.t();
+		t = -R * t;
+	}
+};
+// Match 2D to 3D using image retrieval as a proxy for possible co-visibility,
+// and use depth values (from slam) to recover transformation
+class Match_2d_3d_dlt: public MatchingMethod {
+
+	bool needs3dDatabasePoints() override {
+		return true;
+	}
+	bool needs3dQueryPoints() override {
+		return false;
+	}
+
+	void internalDoMatching(const Query& q, const Result& top_result, const vector<Point2f>& query_pts,
+			const vector<Point2f>& database_pts, int& num_inliers, Mat R, Mat t) {
+		throw runtime_error("DLT not yet implemented!");
+	}
+};
+// TODO: direct 3D-3D matching using depth maps? Or 3D-2D matching using a
+// prioritized search, as in Sattler et al. 2011?
+
+unique_ptr<MatchingMethod> matching_method;
+
+
 void usage(char** argv, const po::options_description commandline_args) {
 	cout << "Usage: " << argv[0] << " [options]" << endl;
 	cout << commandline_args << "\n";
 }
-
-unique_ptr<SceneParser> scene_parser;
 
 void parseArguments(int argc, char** argv) {
 	// Arguments, can be specified on commandline or in a file settings.config
@@ -267,7 +409,10 @@ void parseArguments(int argc, char** argv) {
 			("epsilon_translation", po::value<double>()->default_value(0.05), "Distance in the scene coordinate system for a pose"
 					" to be considered accurate.")
 			("mapping_method", po::value<string>()->default_value(""), "Mapping/SLAM method for building a map"
-					" to relocalize against. Can be 'DSO' or left empty.");
+					" to relocalize against. Can be 'DSO' or left empty.")
+			("pose_estimation_method", po::value<string>()->default_value(""), "Mapping/SLAM method for building a map"
+					" to relocalize against. Can be '5point_E' to decompose an essential matrix (and use the ground-truth scale),"
+					" 'DLT' to compute a direct linear transform (requires mapping_method to be specified), or left empty.");
 
 	po::options_description commandline_args;
 	commandline_args.add(commandline_exclusive).add(general_args);
@@ -308,6 +453,18 @@ void parseArguments(int argc, char** argv) {
 	epsilon_angle_deg = vm["epsilon_angle_deg"].as<double>();
 	epsilon_translation = vm["epsilon_translation"].as<double>();
 	slam_method = vm["mapping_method"].as<string>();
+	string matching_method_str = vm["pose_estimation_method"].as<string>();
+	if (matching_method_str.length() == 0 || matching_method_str.find("5point_E") == 0) {
+		matching_method = unique_ptr<MatchingMethod>(new Match_2d_2d_5point());
+	} else if (matching_method_str.find("DLT") == 0) {
+		matching_method = unique_ptr<MatchingMethod>(new Match_2d_3d_dlt());
+	} else {
+		throw runtime_error("Invalid value for pose_estimation_method!");
+	}
+
+	if (slam_method.length() == 0 && matching_method_str.find("DLT") == 0) {
+		throw runtime_error("A 3D matching method was specified, but no SLAM method was specified.");
+	}
 
 	if (vm.count("scene")) {
 
@@ -350,15 +507,25 @@ int main(int argc, char** argv) {
 
 	Ptr<Feature2D> sift = xfeatures2d::SIFT::create();
 
+	Ptr<Feature2D> detector;
+	if(matching_method->needs3dDatabasePoints()){
+		detector = Ptr<Feature2D>(new PassThroughFeatureDetector());
+	} else {
+		detector = sift;
+	}
+
 	for (auto& db : dbs) {
 		db.setVocabularySize(vocabulary_size);
-		db.setFeatureDetector(sift);
+		db.setupFeatureDetector(matching_method->needs3dDatabasePoints());
 		db.setDescriptorExtractor(sift);
 		db.setBowExtractor(makePtr<BOWSparseImgDescriptorExtractor>(sift, FlannBasedMatcher::create()));
+
 		db.train();
 	}
 	for (sdl::Query& query : queries) {
-		query.setFeatureDetector(sift);
+		// TODO: incorporate previous frames into each query (or maybe just use
+		// the cached depth map, which would be fine for cross-database queries)
+		query.setupFeatureDetector(matching_method->needs3dQueryPoints());
 		query.setDescriptorExtractor(sift);
 		query.computeFeatures();
 	}
@@ -368,14 +535,9 @@ int main(int argc, char** argv) {
 
 	int num_to_return = 8;
 
-	unsigned int total_test_queries = 0;
-	unsigned int epsilon_accurate_test_queries = 0;
-	unsigned int high_inlier_test_queries = 0;
-	unsigned int total_train_queries = 0;
-	unsigned int epsilon_accurate_train_queries = 0;
-	unsigned int high_inlier_train_queries = 0;
 
-	cout << endl;
+	unsigned int total_test_queries = 0;
+	unsigned int total_train_queries = 0;
 
 	for (unsigned int i = 0; i < dbs.size(); i++) {
 		for (unsigned int j = 0; j < queries.size(); j++) {
@@ -489,78 +651,14 @@ int main(int argc, char** argv) {
 				query_pts.push_back(query_keypoints[correspondence.queryIdx].pt);
 				database_pts.push_back(result_keypoints[correspondence.trainIdx].pt);
 			}
-			int ransac_threshold = 3; // in pixels, for the sampson error
-			// TODO: the number of inliers registered for trainset images is
-			// extremely low. Perhaps they are coplanar or otherwise
-			// ill-conditioned? Setting confidence to 1 forces RANSAC to use
-			// its default maximum number of iterations (1000), but it would
-			// be better to filter the data, or increase the max number of
-			// trials.
-			double confidence = 0.999999;
 
-			// pretty sure this is the correct order
-			Mat inlier_mask;
-			Mat E = findEssentialMat(database_pts, query_pts, K, RANSAC, confidence, ransac_threshold, inlier_mask);
-			Mat R, t;
-			int num_inliers = recoverPose(E, database_pts, query_pts, K, R, t, inlier_mask);
-			// watch out: E, R, & t are double precision (even though we only ever passed floats)
-
-			if (num_inliers >= 12) {
-				if (queries[j].parent_database_id == dbs[i].db_id) {
-					high_inlier_train_queries++;
-				} else {
-					high_inlier_test_queries++;
-				}
-			}
-
-			R = R.t();
-			t = -R * t;
-
-			Mat db_R_gt, db_t_gt;
-			scene_parser->loadGroundTruthPose(top_result.frame, db_R_gt, db_t_gt);
-			Mat query_R_gt, query_t_gt;
-			scene_parser->loadGroundTruthPose(*queries[j].frame, query_R_gt, query_t_gt);
-
-			// This is only known up to scale. So cheat by fixing the scale to the ground truth.
-			t *= norm(db_t_gt - query_t_gt)/norm(t);
-
-			Mat estimated_R = db_R_gt * R;
-			Mat estimated_t = db_R_gt * t + db_t_gt;
-
-			double translation_error = norm(query_t_gt, estimated_t);
-			// compute angle between rotation matrices
-			Mat rotation_diff = (query_R_gt * estimated_R.t());
-			// if v is the unit vector in direction x, we want acos(v dot Rv) = acos(R_00)
-			float angle_error_rad = acos(rotation_diff.at<double>(0, 0));
-			float angle_error_deg = (180. * angle_error_rad / M_PI);
-
-			if ((translation_error < epsilon_translation) && (angle_error_deg < epsilon_angle_deg)) {
-				if (queries[j].parent_database_id == dbs[i].db_id) {
-					epsilon_accurate_train_queries++;
-				} else {
-					epsilon_accurate_test_queries++;
-				}
-			}
+			matching_method->doMatching(queries[j], top_result, queries[j].parent_database_id == dbs[i].db_id, database_pts, query_pts);
 
 		}
 
 	}
 
-	double train_reg_accuracy = static_cast<double>(high_inlier_train_queries) / total_train_queries;
-	double test_reg_accuracy = static_cast<double>(high_inlier_test_queries) / total_test_queries;
-	double train_loc_accuracy = static_cast<double>(epsilon_accurate_train_queries) / total_train_queries;
-	double test_loc_accuracy = static_cast<double>(epsilon_accurate_test_queries) / total_test_queries;
-
-	cout << endl;
-	cout << "Processed " << (total_test_queries + total_train_queries) << " queries! (" << total_train_queries
-			<< " queries on their own train set database, and " << total_test_queries
-			<< " on separate test set databases)" << endl;
-	cout << "Train set registration accuracy (num inliers after pose recovery >= 12): " << train_reg_accuracy << endl;
-	cout << "Test set registration accuracy (num inliers after pose recovery >= 12): " << test_reg_accuracy << endl;
-	cout << "Train set localization accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg << " deg): "
-			<< train_loc_accuracy << endl;
-	cout << "Test set localization accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg << " deg): "
-			<< test_loc_accuracy << endl;
+	matching_method->printResults(total_train_queries, total_test_queries);
 
 	return 0;
 }
