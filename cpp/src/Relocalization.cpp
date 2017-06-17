@@ -17,6 +17,7 @@
 #include "MapGenerator.h"
 #include "Relocalization.h"
 #include "LargeBagOfWords.h"
+#include "CustomSiftKeypoints.h"
 
 using namespace std;
 using namespace cv;
@@ -302,9 +303,19 @@ int Database::computeDescriptorsForEachFrame(map<int, vector<KeyPoint>>& image_k
 				for(auto iter=scene_coords.begin(); iter != scene_coords.end(); ++iter){
 					int y = iter.node()->idx[0];
 					int x = iter.node()->idx[1];
-					// TODO: should we randomize the size here, to get scale-invariant descriptors?
 					image_keypoints[frame->index].push_back(KeyPoint(x, y, 1));
 				}
+				// this computes scale and rotation invariant sizes and
+				// angles, a la SIFT. Maybe adjustments need to be made
+				// for other feature types.
+				computeSiftOrientationAndScale(colorImage, image_keypoints[frame->index]);
+
+				cout << "keypoints: [";
+				for (auto& kpt : image_keypoints[frame->index]) {
+					cout << "((" << kpt.pt.x << ", " << kpt.pt.y << "), angle=" << kpt.angle << ", size=" << kpt.size
+							<< ", oct=" << kpt.octave << "), ";
+				}
+				cout << endl;
 			} else {
 				// hopefully the descriptor extractor also has a keypoint detector implemented
 				descriptorExtractor->detect(colorImage, image_keypoints[frame->index]);
