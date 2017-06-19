@@ -17,7 +17,7 @@
 #include "MapGenerator.h"
 #include "Relocalization.h"
 #include "LargeBagOfWords.h"
-#include "CustomSiftKeypoints.h"
+#include "FusedFeatureDescriptors.h"
 
 using namespace std;
 using namespace cv;
@@ -113,7 +113,7 @@ struct Database::InvertedIndexImpl {
 };
 
 Database::Database() :
-		db_id(-1), detectFromDepthMaps(false), frames(new map<int, unique_ptr<Frame>>()), pInvertedIndexImpl(
+		db_id(-1), associateWithDepthMaps(false), frames(new map<int, unique_ptr<Frame>>()), pInvertedIndexImpl(
 				new Database::InvertedIndexImpl()) {
 }
 // Need to explicitly define destructor and move constructor, otherwise
@@ -174,8 +174,8 @@ vector<Result> Database::lookup(const Query& query, unsigned int num_to_return) 
 	return results;
 }
 
-void Database::setupFeatureDetector(bool detect_from_depth_maps) {
-	detectFromDepthMaps = detect_from_depth_maps;
+void Database::setupFeatureDetector(bool associate_with_depth_maps) {
+	associateWithDepthMaps = associate_with_depth_maps;
 }
 
 void Database::setDescriptorExtractor(Ptr<DescriptorExtractor> descriptor_extractor) {
@@ -295,32 +295,19 @@ int Database::computeDescriptorsForEachFrame(map<int, vector<KeyPoint>>& image_k
 
 		// this can be quite slow, so reload a cached copy from disk if it's available
 		if (!frame->loadDescriptors(image_keypoints[frame->index], image_descriptors[frame->index])) {
-			if(detectFromDepthMaps){
+			if (associateWithDepthMaps) {
+
+				SceneCoordFeatureDetector* with_depth = dynamic_cast<SceneCoordFeatureDetector*>(descriptorExtractor.get());
 				// careful: if we're only using keypoints detected by visual
 				// odometry, some frames may have 0 keypoints (ie due to dropped
 				// frames or mapping failure (even if it recovered in later frames))
 				SparseMat scene_coords = loadSceneCoordinates(frame->index);
-				for(auto iter=scene_coords.begin(); iter != scene_coords.end(); ++iter){
-					int y = iter.node()->idx[0];
-					int x = iter.node()->idx[1];
-					image_keypoints[frame->index].push_back(KeyPoint(x, y, 1));
-				}
-				// this computes scale and rotation invariant sizes and
-				// angles, a la SIFT. Maybe adjustments need to be made
-				// for other feature types.
-				computeSiftOrientationAndScale(colorImage, image_keypoints[frame->index]);
+				with_depth->setCurrentSceneCoords(scene_coords);
 
-				cout << "keypoints: [";
-				for (auto& kpt : image_keypoints[frame->index]) {
-					cout << "((" << kpt.pt.x << ", " << kpt.pt.y << "), angle=" << kpt.angle << ", size=" << kpt.size
-							<< ", oct=" << kpt.octave << "), ";
-				}
-				cout << endl;
-			} else {
-				// hopefully the descriptor extractor also has a keypoint detector implemented
-				descriptorExtractor->detect(colorImage, image_keypoints[frame->index]);
 			}
+			descriptorExtractor->detect(colorImage, image_keypoints[frame->index]);
 			descriptorExtractor->compute(colorImage, image_keypoints[frame->index], image_descriptors[frame->index]);
+
 			frame->saveDescriptors(image_keypoints[frame->index], image_descriptors[frame->index]);
 		}
 		total_descriptors += image_descriptors[frame->index].rows;

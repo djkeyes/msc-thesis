@@ -152,7 +152,7 @@ private:
 	std::unique_ptr<MapGenerator> mapGen;
 
 	cv::Ptr<cv::DescriptorExtractor> descriptorExtractor;
-	bool detectFromDepthMaps;
+	bool associateWithDepthMaps;
 
 	cv::Mat vocabulary;
 	cv::Ptr<cv::BOWSparseImgDescriptorExtractor> bowExtractor;
@@ -160,13 +160,6 @@ private:
 	std::unique_ptr<std::map<int, std::unique_ptr<Frame>>>frames;
 
 	std::unique_ptr<InvertedIndexImpl> pInvertedIndexImpl;
-};
-
-/*
- * Feature detector that allows users to specify a pre-selected list of keypoints.
- */
-class PassThroughFeatureDetector: public cv::FeatureDetector {
-
 };
 
 }

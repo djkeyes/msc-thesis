@@ -18,6 +18,7 @@
 #include "opencv2/core/operations.hpp"
 
 #include "Relocalization.h"
+#include "FusedFeatureDescriptors.h"
 
 namespace po = boost::program_options;
 namespace fs = boost::filesystem;
@@ -527,7 +528,7 @@ int main(int argc, char** argv) {
 
 	Ptr<Feature2D> detector;
 	if(matching_method->needs3dDatabasePoints()){
-		detector = Ptr<Feature2D>(new PassThroughFeatureDetector());
+		detector = Ptr<Feature2D>(new NearestDescriptorAssigner(*sift));
 	} else {
 		detector = sift;
 	}
