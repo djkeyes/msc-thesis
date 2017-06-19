@@ -107,6 +107,61 @@ void Frame::saveDescriptors(const vector<KeyPoint>& keypoints, const Mat& descri
 	ofs.close();
 }
 
+boost::filesystem::path Frame::getSceneCoordinateFilename() const {
+	stringstream ss;
+	ss << "scene_coords_" << index << ".png";
+	return cachePath / ss.str();
+}
+void Frame::saveSceneCoordinates(cv::SparseMat coordinate_map) const {
+	// Can't use imwrite/read, since that only works on cv::mat of type CV_8BC3
+
+	assert(coordinate_map.type() == CV_32FC3);
+
+	fs::path filename(getSceneCoordinateFilename().string());
+	fs::create_directories(filename.parent_path());
+
+	ofstream ofs(filename.string(), ios_base::out | ios_base::binary);
+
+	uint32_t rows = coordinate_map.size(0);
+	uint32_t cols = coordinate_map.size(1);
+	uint32_t size = coordinate_map.nzcount();
+	ofs.write((char*) &rows, sizeof(uint32_t));
+	ofs.write((char*) &cols, sizeof(uint32_t));
+	ofs.write((char*) &size, sizeof(uint32_t));
+	for (auto iter = coordinate_map.begin(); iter != coordinate_map.end(); ++iter) {
+		cv::Vec3f& val = iter.value<cv::Vec3f>();
+		uint16_t row = iter.node()->idx[0];
+		uint16_t col = iter.node()->idx[1];
+		ofs.write((char*) &row, sizeof(uint16_t));
+		ofs.write((char*) &col, sizeof(uint16_t));
+		ofs.write((char*) &val, sizeof(cv::Vec3f));
+	}
+
+	ofs.close();
+}
+cv::SparseMat Frame::loadSceneCoordinates() const {
+
+	ifstream ifs(getSceneCoordinateFilename().string(), ios_base::in | ios_base::binary);
+
+	uint32_t rows, cols, size;
+	ifs.read((char*) &rows, sizeof(uint32_t));
+	ifs.read((char*) &cols, sizeof(uint32_t));
+	ifs.read((char*) &size, sizeof(uint32_t));
+	cv::SparseMat coordinate_map;
+	int dims[] = { static_cast<int>(rows), static_cast<int>(cols) };
+	coordinate_map.create(2, dims, CV_32FC3);
+	for (int i = 0; i < static_cast<int>(size); ++i) {
+		uint16_t row, col;
+		ifs.read((char*) &row, sizeof(uint16_t));
+		ifs.read((char*) &col, sizeof(uint16_t));
+		cv::Vec3f val;
+		ifs.read((char*) &val, sizeof(cv::Vec3f));
+		coordinate_map.ref<cv::Vec3f>(static_cast<int>(row), static_cast<int>(col)) = val;
+	}
+	ifs.close();
+
+	return coordinate_map;
+}
 struct Database::InvertedIndexImpl {
 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 	geometric_burstiness::InvertedIndex<64> invertedIndex;
@@ -204,9 +259,9 @@ void Database::doMapping() {
 		if (iter == scene_coordinate_maps.end()) {
 			cv::SparseMat empty;
 			empty.create(2, dims, CV_32FC3);
-			saveSceneCoordinates(frame_id, empty);
+			frames->at(frame_id)->saveSceneCoordinates(empty);
 		} else {
-			saveSceneCoordinates(frame_id, iter->second);
+			frames->at(frame_id)->saveSceneCoordinates(iter->second);
 		}
 	}
 
@@ -217,11 +272,6 @@ void Database::doMapping() {
 	// clear mapGen, since it hogs a bunch of memory
 	mapGen.release();
 }
-boost::filesystem::path Database::getSceneCoordinateFilename(int frame_id) const {
-	stringstream ss;
-	ss << "scene_coords_" << frame_id << ".png";
-	return cachePath / ss.str();
-}
 bool Database::needToRecomputeSceneCoordinates() const {
 	unsigned int num_saved_coords = 0;
 	for (auto file : fs::recursive_directory_iterator(cachePath)) {
@@ -230,56 +280,6 @@ bool Database::needToRecomputeSceneCoordinates() const {
 		}
 	}
 	return num_saved_coords != frames->size();
-}
-void Database::saveSceneCoordinates(int frame_id, cv::SparseMat coordinate_map) const {
-	// Can't use imwrite/read, since that only works on cv::mat of type CV_8BC3
-
-	assert(coordinate_map.type() == CV_32FC3);
-
-	fs::path filename(getSceneCoordinateFilename(frame_id).string());
-	fs::create_directories(filename.parent_path());
-
-	ofstream ofs(filename.string(), ios_base::out | ios_base::binary);
-
-	uint32_t rows = coordinate_map.size(0);
-	uint32_t cols = coordinate_map.size(1);
-	uint32_t size = coordinate_map.nzcount();
-	ofs.write((char*) &rows, sizeof(uint32_t));
-	ofs.write((char*) &cols, sizeof(uint32_t));
-	ofs.write((char*) &size, sizeof(uint32_t));
-	for (auto iter = coordinate_map.begin(); iter != coordinate_map.end(); ++iter) {
-		cv::Vec3f& val = iter.value<cv::Vec3f>();
-		uint16_t row = iter.node()->idx[0];
-		uint16_t col = iter.node()->idx[1];
-		ofs.write((char*) &row, sizeof(uint16_t));
-		ofs.write((char*) &col, sizeof(uint16_t));
-		ofs.write((char*) &val, sizeof(cv::Vec3f));
-	}
-
-	ofs.close();
-}
-cv::SparseMat Database::loadSceneCoordinates(int frame_id) const {
-
-	ifstream ifs(getSceneCoordinateFilename(frame_id).string(), ios_base::in | ios_base::binary);
-
-	uint32_t rows, cols, size;
-	ifs.read((char*) &rows, sizeof(uint32_t));
-	ifs.read((char*) &cols, sizeof(uint32_t));
-	ifs.read((char*) &size, sizeof(uint32_t));
-	cv::SparseMat coordinate_map;
-	int dims[] = { static_cast<int>(rows), static_cast<int>(cols) };
-	coordinate_map.create(2, dims, CV_32FC3);
-	for (int i = 0; i < static_cast<int>(size); ++i) {
-		uint16_t row, col;
-		ifs.read((char*) &row, sizeof(uint16_t));
-		ifs.read((char*) &col, sizeof(uint16_t));
-		cv::Vec3f val;
-		ifs.read((char*) &val, sizeof(cv::Vec3f));
-		coordinate_map.ref<cv::Vec3f>(static_cast<int>(row), static_cast<int>(col)) = val;
-	}
-	ifs.close();
-
-	return coordinate_map;
 }
 int Database::computeDescriptorsForEachFrame(map<int, vector<KeyPoint>>& image_keypoints, map<int, Mat>& image_descriptors) {
 
@@ -301,7 +301,8 @@ int Database::computeDescriptorsForEachFrame(map<int, vector<KeyPoint>>& image_k
 				// careful: if we're only using keypoints detected by visual
 				// odometry, some frames may have 0 keypoints (ie due to dropped
 				// frames or mapping failure (even if it recovered in later frames))
-				SparseMat scene_coords = loadSceneCoordinates(frame->index);
+				SparseMat scene_coords = frame->loadSceneCoordinates();
+
 				with_depth->setCurrentSceneCoords(scene_coords);
 
 			}
@@ -654,7 +655,7 @@ void Database::saveVocabulary(const cv::Mat& vocabulary) const {
 	ofs.close();
 }
 
-Query::Query(const unsigned int parent_database_id, const Frame * const frame) :
+Query::Query(const unsigned int parent_database_id, const Frame * frame) :
 		parent_database_id(parent_database_id), frame(frame), detectFromDepthMaps(false) {
 }
 

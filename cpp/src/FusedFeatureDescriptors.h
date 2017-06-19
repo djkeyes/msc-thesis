@@ -28,8 +28,23 @@ protected:
 class NearestDescriptorAssigner: public SceneCoordFeatureDetector {
 
 public:
-	NearestDescriptorAssigner(cv::Feature2D feature);
+	NearestDescriptorAssigner(cv::Feature2D& feature);
 	~NearestDescriptorAssigner() = default;
+
+	int descriptorSize() const override
+	{
+	    return feature.descriptorSize();
+	}
+
+	int descriptorType() const override
+	{
+	    return feature.descriptorType();
+	}
+
+	int defaultNorm() const override
+	{
+		return feature.defaultNorm();
+	}
 
 	void detectAndCompute(cv::InputArray image, cv::InputArray mask, std::vector<cv::KeyPoint>& keypoints,
 			cv::OutputArray descriptors, bool useProvidedKeypoints = false) override;

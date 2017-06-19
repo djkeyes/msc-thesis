@@ -111,8 +111,7 @@ public:
 					sorted_images.push_back(image_filename);
 				}
 
-				Query q(cur_db.db_id, frame.get());
-				queries.push_back(q);
+				queries.emplace_back(cur_db.db_id, frame.get());
 				cur_db.addFrame(move(frame));
 			}
 
@@ -212,8 +211,7 @@ public:
 					sorted_images.push_back(image_filename);
 				}
 
-				Query q(cur_db.db_id, frame.get());
-				queries.push_back(q);
+				queries.emplace_back(cur_db.db_id, frame.get());
 				cur_db.addFrame(move(frame));
 			}
 
@@ -256,7 +254,7 @@ public:
 			const vector<Point2f>& database_pts) {
 		int num_inliers;
 		Mat R, t;
-		internalDoMatching(query_pts, database_pts, num_inliers, R, t);
+		internalDoMatching(top_result, query_pts, database_pts, num_inliers, R, t);
 
 		updateResults(q, top_result, same_database, num_inliers, R, t);
 	}
@@ -279,7 +277,7 @@ public:
 		Mat db_R_gt, db_t_gt;
 		scene_parser->loadGroundTruthPose(top_result.frame, db_R_gt, db_t_gt);
 		Mat query_R_gt, query_t_gt;
-		scene_parser->loadGroundTruthPose(*q.frame, query_R_gt, query_t_gt);
+		scene_parser->loadGroundTruthPose(*q.getFrame(), query_R_gt, query_t_gt);
 
 		// This is only known up to scale. So cheat by fixing the scale to the ground truth.
 		if (!needs3dDatabasePoints() && !needs3dQueryPoints()) {
@@ -332,7 +330,7 @@ public:
 	unsigned int high_inlier_train_queries = 0;
 
 protected:
-	virtual void internalDoMatching(const vector<Point2f>& query_pts, const vector<Point2f>& database_pts,
+	virtual void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts, const vector<Point2f>& database_pts,
 			int& num_inliers, Mat R, Mat t) = 0;
 
 	Mat K;
@@ -348,7 +346,7 @@ class Match_2d_2d_5point: public MatchingMethod {
 		return false;
 	}
 
-	void internalDoMatching(const vector<Point2f>& query_pts, const vector<Point2f>& database_pts, int& num_inliers,
+	void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts, const vector<Point2f>& database_pts, int& num_inliers,
 			Mat R, Mat t) override {
 		int ransac_threshold = 3; // in pixels, for the sampson error
 		// TODO: the number of inliers registered for trainset images is
@@ -381,18 +379,30 @@ class Match_2d_3d_dlt: public MatchingMethod {
 		return false;
 	}
 
-	void internalDoMatching(const vector<Point2f>& query_pts, const vector<Point2f>& database_pts, int& num_inliers,
+	void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts, const vector<Point2f>& database_pts, int& num_inliers,
 			Mat R, Mat t) override {
 
 		int num_iters = 1000;
 		double confidence = 0.999999;
 		double ransac_threshold = 8.0;
 
+		// lookup scene coords from database_pts
+		SparseMat scene_coords = top_result.frame.loadSceneCoordinates();
+		vector<Point3f> scene_coord_vec;
+		scene_coord_vec.reserve(database_pts.size());
+		for (const auto& point : database_pts) {
+			scene_coord_vec.push_back(
+					scene_coords.value<Point3f>(static_cast<int>(point.y), static_cast<int>(point.x)));
+		}
+
 		Mat rvec, inlier_mask;
-		solvePnPRansac(database_pts, query_pts, K, noArray(), rvec, t, false, num_iters, ransac_threshold, confidence,
+
+		throw runtime_error("check the TODO in Match_2d_3d_dlt");
+		solvePnPRansac(scene_coord_vec, query_pts, K, noArray(), rvec, t, false, num_iters, ransac_threshold, confidence,
 				inlier_mask);
 		Rodrigues(rvec, R);
 		num_inliers = countNonZero(inlier_mask);
+
 
 		// Convert from project matrix parameters (world to camera) to camera pose (camera to world)
 		R = R.t();
@@ -524,7 +534,7 @@ int main(int argc, char** argv) {
 
 	scene_parser->parseScene(dbs, queries);
 
-	Ptr<Feature2D> sift = xfeatures2d::SIFT::create();
+	Ptr<Feature2D> sift = xfeatures2d::SIFT::create(20000, 3, 0.005, 80);
 
 	Ptr<Feature2D> detector;
 	if(matching_method->needs3dDatabasePoints()){
@@ -533,10 +543,10 @@ int main(int argc, char** argv) {
 		detector = sift;
 	}
 
-	for (auto& db : dbs) {
+	for (sdl::Database& db : dbs) {
 		db.setVocabularySize(vocabulary_size);
 		db.setupFeatureDetector(matching_method->needs3dDatabasePoints());
-		db.setDescriptorExtractor(sift);
+		db.setDescriptorExtractor(detector);
 		db.setBowExtractor(makePtr<BOWSparseImgDescriptorExtractor>(sift, FlannBasedMatcher::create()));
 
 		db.train();
@@ -549,8 +559,18 @@ int main(int argc, char** argv) {
 		query.computeFeatures();
 	}
 
+	// Ideally most queries should be valid. :(
+	// If this is nonzero, it's probably due to a lack of keyframe density
+	// during visual odometry, and discarding empty frames isn't so bad.
+	int orig_query_count = queries.size();
+	queries.erase(std::remove_if(queries.begin(), queries.end(), [](Query& q) {return q.getDescriptors().empty();}),
+			queries.end());
+	int pruned_query_count = queries.size();
+	cout << "Have " << pruned_query_count << " valid queries after removing " << (orig_query_count - pruned_query_count)
+			<< " empty queries." << endl;
+
 	// TODO: use an actually calibrated camera model
-	Mat K = get<0>(getDummyCalibration(queries[0].frame->imagePath.string()));
+	Mat K = get<0>(getDummyCalibration(queries[0].getFrame()->imagePath.string()));
 
 	int num_to_return = 8;
 
@@ -560,7 +580,7 @@ int main(int argc, char** argv) {
 
 	for (unsigned int i = 0; i < dbs.size(); i++) {
 		for (unsigned int j = 0; j < queries.size(); j++) {
-			if (queries[j].parent_database_id == dbs[i].db_id) {
+			if (queries[j].getParentDatabaseId() == dbs[i].db_id) {
 				total_train_queries++;
 			} else {
 				total_test_queries++;
@@ -671,7 +691,8 @@ int main(int argc, char** argv) {
 				database_pts.push_back(result_keypoints[correspondence.trainIdx].pt);
 			}
 
-			matching_method->doMatching(queries[j], top_result, queries[j].parent_database_id == dbs[i].db_id, database_pts, query_pts);
+			matching_method->doMatching(queries[j], top_result, queries[j].getParentDatabaseId() == dbs[i].db_id,
+					database_pts, query_pts);
 
 		}
 

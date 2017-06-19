@@ -44,6 +44,10 @@ struct Frame {
 	void saveDescriptors(const std::vector<cv::KeyPoint>& keypoints,
 			const cv::Mat& descriptors) const;
 
+	boost::filesystem::path getSceneCoordinateFilename() const;
+	void saveSceneCoordinates(cv::SparseMat coordinate_map) const;
+	cv::SparseMat loadSceneCoordinates() const;
+
 };
 
 struct Result {
@@ -59,7 +63,7 @@ class Database;
 
 class Query {
 public:
-	Query(const unsigned int parent_database_id, const Frame * const frame);
+	Query(const unsigned int parent_database_id, const Frame * frame);
 
 	void computeFeatures();
 	void setupFeatureDetector(bool detect_from_depth_map);
@@ -68,10 +72,16 @@ public:
 	const std::vector<cv::KeyPoint>& getKeypoints() const;
 	const cv::Mat& getDescriptors() const;
 
-	const unsigned int parent_database_id;
-	const Frame * const frame;
+	const unsigned int getParentDatabaseId() const {
+		return parent_database_id;
+	}
+	const Frame* const getFrame() const {
+		return frame;
+	}
 private:
 
+	unsigned int parent_database_id;
+	const Frame * frame;
 
 	bool detectFromDepthMaps;
 	cv::Ptr<cv::DescriptorExtractor> descriptorExtractor;
@@ -123,10 +133,7 @@ private:
 
 	// Utility functions used in train()
 	void doMapping();
-	boost::filesystem::path getSceneCoordinateFilename(int frame_id) const;
 	bool needToRecomputeSceneCoordinates() const;
-	void saveSceneCoordinates(int frame_id, cv::SparseMat coordinate_map) const;
-	cv::SparseMat loadSceneCoordinates(int frame_id) const;
 	int computeDescriptorsForEachFrame(
 			std::map<int, std::vector<cv::KeyPoint>>& image_keypoints,
 			std::map<int, cv::Mat>& image_descriptors);
