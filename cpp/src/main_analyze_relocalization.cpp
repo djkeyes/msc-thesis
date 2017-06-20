@@ -397,7 +397,6 @@ class Match_2d_3d_dlt: public MatchingMethod {
 
 		Mat rvec, inlier_mask;
 
-		throw runtime_error("check the TODO in Match_2d_3d_dlt");
 		solvePnPRansac(scene_coord_vec, query_pts, K, noArray(), rvec, t, false, num_iters, ransac_threshold, confidence,
 				inlier_mask);
 		Rodrigues(rvec, R);
