@@ -569,7 +569,9 @@ int main(int argc, char** argv) {
 			<< " empty queries." << endl;
 
 	// TODO: use an actually calibrated camera model
+	// supposedly COLMAP can estimate calibration from video as part of its optimization?
 	Mat K = get<0>(getDummyCalibration(queries[0].getFrame()->imagePath.string()));
+	matching_method->setK(K);
 
 	int num_to_return = 8;
 
