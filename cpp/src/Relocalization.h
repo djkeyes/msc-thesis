@@ -18,11 +18,12 @@
 
 namespace sdl {
 struct Frame {
-	int index;
+	int index, dbId;
+
 	boost::filesystem::path depthmapPath, imagePath, pointcloudPath, cachePath;
 
-	Frame(int index) :
-			index(index) {
+	Frame(int index, int db_id) :
+			index(index), dbId(db_id) {
 	}
 
 	void setDepthmapPath(boost::filesystem::path path) {

@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include <Eigen/Core>
+
 #include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
 #include "opencv2/calib3d/calib3d.hpp"
@@ -16,6 +18,7 @@
 #include "opencv2/highgui.hpp"
 #include "opencv2/imgproc.hpp"
 #include "opencv2/core/operations.hpp"
+#include "opencv2/core/eigen.hpp"
 
 #include "Relocalization.h"
 #include "FusedFeatureDescriptors.h"
@@ -103,7 +106,7 @@ public:
 				}
 				// these files are in the format frame-XXXXXX.color.png
 				int id = stoi(name.substr(6, 6));
-				unique_ptr<Frame> frame(new sdl::Frame(id));
+				unique_ptr<Frame> frame(new sdl::Frame(id, cur_db.db_id));
 				frame->setImagePath(file);
 				if (!cache.empty()) {
 					string image_filename(file.path().string());
@@ -203,7 +206,7 @@ public:
 				}
 				// these files are in the format XXXXX.jpg
 				int id = stoi(name.substr(0, 5));
-				unique_ptr<Frame> frame(new sdl::Frame(id));
+				unique_ptr<Frame> frame(new sdl::Frame(id, cur_db.db_id));
 				frame->setImagePath(file);
 				if (!cache.empty()) {
 					string image_filename(file.path().string());
@@ -223,12 +226,51 @@ public:
 				ss << "TumParser for slam method '" << slam_method << "' not implemented!";
 				throw runtime_error(ss.str());
 			}
+
+			// preload the ground truth poses, so we don't have to seek every time
+			// file is sequence_dir/groundtruthSync.txt
+			fs::path pose_path = sequence_dir / "groundtruthSync.txt";
+			ifstream pose_file(pose_path.string());
+
+			string line;
+			int index = 0;
+			while(getline(pose_file, line)){
+				// images/XXXXX.jpg -> line XXXXX of groundtruthSync.txt (both are 0-indexed)
+
+				// time x y z qx qy qz qw
+				stringstream ss(line);
+				float time, x, y, z, qx, qy, qz, qw;
+				ss >> time >> x >> y >> z >> qx >> qy >> qz >> qw;
+
+				// OpenCV doesn't directly support quaternion conversions AFAIK
+				Eigen::Quaternionf orientation(qw, qx, qy, qz);
+				Eigen::Matrix3f as_rot = orientation.toRotationMatrix();
+				Eigen::Vector3f translation(x, y, z);
+
+				Mat R, t;
+				eigen2cv(as_rot, R);
+				eigen2cv(translation, t);
+
+				rotationsAndTranslationsByDatabaseAndFrame[cur_db.db_id][index] = make_tuple(R, t);
+				++index;
+			}
+			pose_file.close();
 		}
+
 	}
 
 	virtual void loadGroundTruthPose(const sdl::Frame& frame, Mat& rotation, Mat& translation) {
-		// TODO
-		throw runtime_error("loadGroundTruthPose(const Frame&, Mat&, Mat&) not implemented!");
+		// for the TUM dataset, initial and final ground truth is available (I
+		// assume during this time, the camera is tracked by an multi-view IR
+		// tracker system or something), but otherwise the pose is recorded as NaN
+
+		// It would almost certainly be better to load all the poses at once,
+		// or at least to cache filehandles instead of re-opening the file for
+		// each one. If/ opening/seeking/closing becomes a bottleneck, refactor
+		// this.
+
+		rotation = get<0>(rotationsAndTranslationsByDatabaseAndFrame[frame.dbId][frame.index]);
+		translation = get<1>(rotationsAndTranslationsByDatabaseAndFrame[frame.dbId][frame.index]);
 	}
 
 	void setCache(fs::path cache_dir) {
@@ -238,6 +280,7 @@ public:
 private:
 	fs::path directory;
 	fs::path cache;
+	map<int, map<int, tuple<Mat, Mat>>> rotationsAndTranslationsByDatabaseAndFrame;
 };
 
 unique_ptr<SceneParser> scene_parser;
@@ -281,10 +324,12 @@ public:
 
 		// This is only known up to scale. So cheat by fixing the scale to the ground truth.
 		if (!needs3dDatabasePoints() && !needs3dQueryPoints()) {
-			cout << "cheating!" << endl;
 			t *= norm(db_t_gt - query_t_gt) / norm(t);
-		} else {
-			cout << "not cheating!" << endl;
+		}
+
+		if (R.empty() || t.empty()) {
+			cout << "invalid transformation! skipping..." << endl;
+			return;
 		}
 
 		Mat estimated_R = db_R_gt * R;
@@ -293,8 +338,8 @@ public:
 		double translation_error = norm(query_t_gt, estimated_t);
 		// compute angle between rotation matrices
 		Mat rotation_diff = (query_R_gt * estimated_R.t());
-		// if v is the unit vector in direction x, we want acos(v dot Rv) = acos(R_00)
-		float angle_error_rad = acos(rotation_diff.at<double>(0, 0));
+		// if v is the unit vector in direction z, we want acos(v dot Rv) = acos(R_22)
+		float angle_error_rad = acos(rotation_diff.at<double>(2, 2));
 		float angle_error_deg = (180. * angle_error_rad / M_PI);
 
 		if ((translation_error < epsilon_translation) && (angle_error_deg < epsilon_angle_deg)) {
@@ -331,7 +376,7 @@ public:
 
 protected:
 	virtual void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts, const vector<Point2f>& database_pts,
-			int& num_inliers, Mat R, Mat t) = 0;
+			int& num_inliers, Mat& R, Mat& t) = 0;
 
 	Mat K;
 };
@@ -347,7 +392,7 @@ class Match_2d_2d_5point: public MatchingMethod {
 	}
 
 	void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts, const vector<Point2f>& database_pts, int& num_inliers,
-			Mat R, Mat t) override {
+			Mat& R, Mat& t) override {
 		int ransac_threshold = 3; // in pixels, for the sampson error
 		// TODO: the number of inliers registered for trainset images is
 		// extremely low. Perhaps they are coplanar or otherwise
@@ -380,7 +425,7 @@ class Match_2d_3d_dlt: public MatchingMethod {
 	}
 
 	void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts, const vector<Point2f>& database_pts, int& num_inliers,
-			Mat R, Mat t) override {
+			Mat& R, Mat& t) override {
 
 		int num_iters = 1000;
 		double confidence = 0.999999;
@@ -402,6 +447,8 @@ class Match_2d_3d_dlt: public MatchingMethod {
 		Rodrigues(rvec, R);
 		num_inliers = countNonZero(inlier_mask);
 
+		R.convertTo(R, CV_32F);
+		t.convertTo(t, CV_32F);
 
 		// Convert from project matrix parameters (world to camera) to camera pose (camera to world)
 		R = R.t();
