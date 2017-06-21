@@ -156,14 +156,14 @@ public:
 		pose_path += ".pose.txt";
 
 		ifstream ifs(pose_path.string());
-		rotation.create(3, 3, CV_64FC1);
-		translation.create(3, 1, CV_64FC1);
+		rotation.create(3, 3, CV_32FC1);
+		translation.create(3, 1, CV_32FC1);
 		// pose is stored as a 4x4 float matrix [R t; 0 1], so we only care about the first 3 rows.
 		for (int i = 0; i < 3; i++) {
-			ifs >> rotation.at<double>(i, 0);
-			ifs >> rotation.at<double>(i, 1);
-			ifs >> rotation.at<double>(i, 2);
-			ifs >> translation.at<double>(i, 0);
+			ifs >> rotation.at<float>(i, 0);
+			ifs >> rotation.at<float>(i, 1);
+			ifs >> rotation.at<float>(i, 2);
+			ifs >> translation.at<float>(i, 0);
 		}
 
 		ifs.close();
@@ -420,10 +420,10 @@ public:
 			for (const auto& element : actualAndExpectedPoses) {
 				const Mat& actual = element.second.first;
 				const Mat& expected = element.second.second;
-				actual_file << actual.at<double>(0, 0) << " " << actual.at<double>(1, 0) << " "
-						<< actual.at<double>(2, 0) << endl;
-				expected_file << expected.at<double>(0, 0) << " " << expected.at<double>(1, 0) << " "
-						<< expected.at<double>(2, 0) << endl;
+				actual_file << actual.at<float>(0, 0) << " " << actual.at<float>(1, 0) << " "
+						<< actual.at<float>(2, 0) << endl;
+				expected_file << expected.at<float>(0, 0) << " " << expected.at<float>(1, 0) << " "
+						<< expected.at<float>(2, 0) << endl;
 			}
 			actual_file.close();
 			expected_file.close();
@@ -498,12 +498,19 @@ class Match_2d_3d_dlt: public MatchingMethod {
 
 		// lookup scene coords from database_pts
 		SparseMat scene_coords = top_result.frame.loadSceneCoordinates();
+		for(auto iter = scene_coords.begin(); iter != scene_coords.end(); ++iter){
+			cout << "[(" << iter.node()->idx[0] << ", " << iter.node()->idx[1] << "): " << iter.value<cv::Point3f>() << "],";
+		}
+		cout << endl;
 		vector<Point3f> scene_coord_vec;
 		scene_coord_vec.reserve(database_pts.size());
 		for (const auto& point : database_pts) {
+			cout << "([" << static_cast<int>(point.y) << "," << static_cast<int>(point.x) << "]: "
+					<< scene_coords.value<Point3f>(static_cast<int>(point.y), static_cast<int>(point.x)) << "), ";
 			scene_coord_vec.push_back(
 					scene_coords.value<Point3f>(static_cast<int>(point.y), static_cast<int>(point.x)));
 		}
+		cout << endl;
 
 		Mat rvec, inlier_mask;
 
@@ -512,12 +519,21 @@ class Match_2d_3d_dlt: public MatchingMethod {
 		Rodrigues(rvec, R);
 		num_inliers = countNonZero(inlier_mask);
 
+		if (save_first_trajectory && top_result.frame.dbId == 0) {
+			for(int i=0; i < 5; i++){
+				cout << scene_coord_vec[i] << " <==> " << query_pts[i] << endl;
+			}
+			cout << rvec << endl;
+			cout << R << endl;
+			cout << t << endl;
+		}
 		R.convertTo(R, CV_32F);
 		t.convertTo(t, CV_32F);
 
 		// Convert from project matrix parameters (world to camera) to camera pose (camera to world)
 		R = R.t();
 		t = -R * t;
+
 	}
 };
 // TODO: direct 3D-3D matching using depth maps? Or 3D-2D matching using a
@@ -705,7 +721,7 @@ int main(int argc, char** argv) {
 			}
 
 			vector<sdl::Result> results = dbs[i].lookup(queries[j], num_to_return);
-			sdl::Result& top_result = results[0];
+			sdl::Result& top_result = results[1];
 
 			// display the result in a pretty window
 			if (j < 5 && display_top_matching_images) {
