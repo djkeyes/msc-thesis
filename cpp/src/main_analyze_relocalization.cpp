@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <iomanip>
+#include <locale>
 #include <map>
 #include <memory>
 #include <string>
@@ -30,6 +31,7 @@ using namespace sdl;
 using namespace cv;
 
 bool display_top_matching_images = false;
+bool save_first_trajectory = true;
 
 int vocabulary_size;
 double epsilon_angle_deg;
@@ -49,6 +51,19 @@ tuple<Mat, int, int> getDummyCalibration(const string& filename) {
 	K.at<float>(1, 2) = img_height / 2 - 0.5;
 	K.at<float>(2, 2) = 1;
 	return make_tuple(K, img_width, img_height);
+}
+
+void read_float_or_nan_or_inf(istream& in, float& value) {
+	// This isn't especially performant, but works in a pinch
+	string tmp;
+	in >> tmp;
+	std::transform(tmp.begin(), tmp.end(), tmp.begin(), ::tolower);
+	if (tmp.find("nan") == 0) {
+		value = numeric_limits<float>::quiet_NaN();
+	} else {
+		stringstream ss(tmp);
+		ss >> value;
+	}
 }
 class SceneParser {
 public:
@@ -240,7 +255,14 @@ public:
 				// time x y z qx qy qz qw
 				stringstream ss(line);
 				float time, x, y, z, qx, qy, qz, qw;
-				ss >> time >> x >> y >> z >> qx >> qy >> qz >> qw;
+				ss >> time;
+				read_float_or_nan_or_inf(ss, x);
+				read_float_or_nan_or_inf(ss, y);
+				read_float_or_nan_or_inf(ss, z);
+				read_float_or_nan_or_inf(ss, qx);
+				read_float_or_nan_or_inf(ss, qy);
+				read_float_or_nan_or_inf(ss, qz);
+				read_float_or_nan_or_inf(ss, qw);
 
 				// OpenCV doesn't directly support quaternion conversions AFAIK
 				Eigen::Quaternionf orientation(qw, qx, qy, qz);
@@ -269,8 +291,8 @@ public:
 		// each one. If/ opening/seeking/closing becomes a bottleneck, refactor
 		// this.
 
-		rotation = get<0>(rotationsAndTranslationsByDatabaseAndFrame[frame.dbId][frame.index]);
-		translation = get<1>(rotationsAndTranslationsByDatabaseAndFrame[frame.dbId][frame.index]);
+		rotation = get<0>(rotationsAndTranslationsByDatabaseAndFrame.at(frame.dbId).at(frame.index));
+		translation = get<1>(rotationsAndTranslationsByDatabaseAndFrame.at(frame.dbId).at(frame.index));
 	}
 
 	void setCache(fs::path cache_dir) {
@@ -322,8 +344,27 @@ public:
 		Mat query_R_gt, query_t_gt;
 		scene_parser->loadGroundTruthPose(*q.getFrame(), query_R_gt, query_t_gt);
 
+		// Note: iff x = nan, then x != x is true.
+		// Use this to detect nan-filled matrices.
+		if ((countNonZero(db_t_gt != db_t_gt) > 0) || countNonZero(query_t_gt != query_t_gt)
+				|| (countNonZero(db_R_gt != db_R_gt) > 0) || countNonZero(query_R_gt != query_R_gt)) {
+			// For the TUM dataset, poses are only known at the beginning and
+			// end, so nans are reasonable. For other datasets, this should not
+			// occur. If we wanted to compare to full trajectories, we could
+			// compute our own SFM pipeline, although that biases our result.
+			return;
+		}
+
 		// This is only known up to scale. So cheat by fixing the scale to the ground truth.
 		if (!needs3dDatabasePoints() && !needs3dQueryPoints()) {
+			t *= norm(db_t_gt - query_t_gt) / norm(t);
+		} else {
+			// Even if we're matching 3D points, the scale of the ground truth
+			// and scale of the reconstruction might not be the same. So
+			// rescale to address that.
+			// TODO: just rescale the reconstruction once at the beginning.
+			// TODO: use the reconstruction as the ground truth, so no need for rescaling.
+			// TODO: what happens if t is very close to 0? or if db_t_gt == query_t_gt?
 			t *= norm(db_t_gt - query_t_gt) / norm(t);
 		}
 
@@ -349,6 +390,10 @@ public:
 				epsilon_accurate_test_queries++;
 			}
 		}
+
+		if (save_first_trajectory && q.getParentDatabaseId() == 0 && top_result.frame.dbId == 0) {
+			actualAndExpectedPoses.insert(make_pair(q.getFrame()->index, make_pair(estimated_t, query_t_gt)));
+		}
 	}
 
 	void printResults(int total_train_queries, int total_test_queries) {
@@ -361,12 +406,29 @@ public:
 		cout << "Processed " << (total_test_queries + total_train_queries) << " queries! (" << total_train_queries
 				<< " queries on their own train set database, and " << total_test_queries
 				<< " on separate test set databases)" << endl;
-		cout << "Train set registration accuracy (num inliers after pose recovery >= 12): " << train_reg_accuracy << endl;
+		cout << "Train set registration accuracy (num inliers after pose recovery >= 12): " << train_reg_accuracy
+				<< endl;
 		cout << "Test set registration accuracy (num inliers after pose recovery >= 12): " << test_reg_accuracy << endl;
-		cout << "Train set localization accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg << " deg): "
-				<< train_loc_accuracy << endl;
-		cout << "Test set localization accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg << " deg): "
-				<< test_loc_accuracy << endl;
+		cout << "Train set localization accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg
+				<< " deg): " << train_loc_accuracy << endl;
+		cout << "Test set localization accuracy (error < " << epsilon_translation << ", " << epsilon_angle_deg
+				<< " deg): " << test_loc_accuracy << endl;
+
+		if (save_first_trajectory) {
+			ofstream actual_file("actual.txt");
+			ofstream expected_file("expected.txt");
+			for (const auto& element : actualAndExpectedPoses) {
+				const Mat& actual = element.second.first;
+				const Mat& expected = element.second.second;
+				actual_file << actual.at<double>(0, 0) << " " << actual.at<double>(1, 0) << " "
+						<< actual.at<double>(2, 0) << endl;
+				expected_file << expected.at<double>(0, 0) << " " << expected.at<double>(1, 0) << " "
+						<< expected.at<double>(2, 0) << endl;
+			}
+			actual_file.close();
+			expected_file.close();
+		}
+
 	}
 
 	unsigned int epsilon_accurate_test_queries = 0;
@@ -375,10 +437,13 @@ public:
 	unsigned int high_inlier_train_queries = 0;
 
 protected:
-	virtual void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts, const vector<Point2f>& database_pts,
-			int& num_inliers, Mat& R, Mat& t) = 0;
+	virtual void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts,
+			const vector<Point2f>& database_pts, int& num_inliers, Mat& R, Mat& t) = 0;
 
 	Mat K;
+
+private:
+	map<int, pair<Mat, Mat>> actualAndExpectedPoses;
 };
 
 // Match between images and compute homography
@@ -622,7 +687,6 @@ int main(int argc, char** argv) {
 
 	int num_to_return = 8;
 
-
 	unsigned int total_test_queries = 0;
 	unsigned int total_train_queries = 0;
 
@@ -741,7 +805,6 @@ int main(int argc, char** argv) {
 
 			matching_method->doMatching(queries[j], top_result, queries[j].getParentDatabaseId() == dbs[i].db_id,
 					database_pts, query_pts);
-
 		}
 
 	}
