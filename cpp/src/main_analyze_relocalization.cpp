@@ -498,19 +498,12 @@ class Match_2d_3d_dlt: public MatchingMethod {
 
 		// lookup scene coords from database_pts
 		SparseMat scene_coords = top_result.frame.loadSceneCoordinates();
-		for(auto iter = scene_coords.begin(); iter != scene_coords.end(); ++iter){
-			cout << "[(" << iter.node()->idx[0] << ", " << iter.node()->idx[1] << "): " << iter.value<cv::Point3f>() << "],";
-		}
-		cout << endl;
 		vector<Point3f> scene_coord_vec;
 		scene_coord_vec.reserve(database_pts.size());
 		for (const auto& point : database_pts) {
-			cout << "([" << static_cast<int>(point.y) << "," << static_cast<int>(point.x) << "]: "
-					<< scene_coords.value<Point3f>(static_cast<int>(point.y), static_cast<int>(point.x)) << "), ";
 			scene_coord_vec.push_back(
 					scene_coords.value<Point3f>(static_cast<int>(point.y), static_cast<int>(point.x)));
 		}
-		cout << endl;
 
 		Mat rvec, inlier_mask;
 
@@ -519,14 +512,6 @@ class Match_2d_3d_dlt: public MatchingMethod {
 		Rodrigues(rvec, R);
 		num_inliers = countNonZero(inlier_mask);
 
-		if (save_first_trajectory && top_result.frame.dbId == 0) {
-			for(int i=0; i < 5; i++){
-				cout << scene_coord_vec[i] << " <==> " << query_pts[i] << endl;
-			}
-			cout << rvec << endl;
-			cout << R << endl;
-			cout << t << endl;
-		}
 		R.convertTo(R, CV_32F);
 		t.convertTo(t, CV_32F);
 
@@ -721,7 +706,7 @@ int main(int argc, char** argv) {
 			}
 
 			vector<sdl::Result> results = dbs[i].lookup(queries[j], num_to_return);
-			sdl::Result& top_result = results[1];
+			sdl::Result& top_result = results[0];
 
 			// display the result in a pretty window
 			if (j < 5 && display_top_matching_images) {
@@ -817,10 +802,11 @@ int main(int argc, char** argv) {
 			for (auto& correspondence : top_result.matches) {
 				query_pts.push_back(query_keypoints[correspondence.queryIdx].pt);
 				database_pts.push_back(result_keypoints[correspondence.trainIdx].pt);
+
 			}
 
 			matching_method->doMatching(queries[j], top_result, queries[j].getParentDatabaseId() == dbs[i].db_id,
-					database_pts, query_pts);
+					query_pts, database_pts);
 		}
 
 	}
