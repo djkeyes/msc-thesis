@@ -11,6 +11,7 @@
 #include <Eigen/StdVector>
 
 #include "opencv2/core/types.hpp"
+#include "opencv2/highgui.hpp"
 #include "opencv2/imgcodecs.hpp"
 #include "geometricburstiness/inverted_index.h"
 
@@ -28,6 +29,8 @@ namespace fs = boost::filesystem;
 EIGEN_DEFINE_STL_VECTOR_SPECIALIZATION(geometric_burstiness::QueryDescriptor<64>)
 
 namespace sdl {
+
+bool display_keypoints = true;
 
 fs::path Frame::getDescriptorFilename() const {
 	stringstream ss;
@@ -285,6 +288,7 @@ int Database::computeDescriptorsForEachFrame(map<int, vector<KeyPoint>>& image_k
 
 	int total_descriptors = 0;
 
+	int num_displayed = 0;
 	// iterate through the images
 	for (const auto& element : *frames) {
 		const auto& frame = element.second;
@@ -308,6 +312,20 @@ int Database::computeDescriptorsForEachFrame(map<int, vector<KeyPoint>>& image_k
 			}
 			descriptorExtractor->detect(colorImage, image_keypoints[frame->index]);
 			descriptorExtractor->compute(colorImage, image_keypoints[frame->index], image_descriptors[frame->index]);
+
+			if (display_keypoints && num_displayed < 5 && !image_keypoints[frame->index].empty()) {
+				drawKeypoints(colorImage, image_keypoints[frame->index], colorImage, Scalar::all(-1),
+						DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+				stringstream ss;
+				ss << "Keypoints in frame " << frame->index << " (db=" << frame->dbId << ")";
+				string window_name(ss.str());
+				namedWindow(window_name, WINDOW_AUTOSIZE);
+				imshow(window_name, colorImage);
+				waitKey(0);
+				destroyWindow(window_name);
+
+				++num_displayed;
+			}
 
 			frame->saveDescriptors(image_keypoints[frame->index], image_descriptors[frame->index]);
 		}
