@@ -14,6 +14,7 @@
 #include <pcl/point_types.h>
 #include <Eigen/Core>
 
+#include "boost/filesystem.hpp"
 #include "util/settings.h"
 #include "util/DatasetReader.h"
 #include "util/NumType.h"
@@ -71,6 +72,7 @@ public:
 			dummyPhotometricGamma[i] = i;
 		}
 
+		boost::filesystem::create_directories(tmp_dir);
 		createUndistorterFromTmpFile(K, width, height, tmp_dir + "/calib.txt");
 
 		// need to perform global initialization
