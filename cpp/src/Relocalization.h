@@ -5,6 +5,7 @@
 #ifndef SRC_RELOCALIZATION_H_
 #define SRC_RELOCALIZATION_H_
 
+#include <functional>
 #include <string>
 #include <vector>
 #include <Eigen/Core>
@@ -17,20 +18,27 @@
 #include "LargeBagOfWords.h"
 
 namespace sdl {
+
+template<typename T>
+using FileLoader = std::function<T(void)>;
+
 struct Frame {
 	int index, dbId;
 
-	boost::filesystem::path depthmapPath, imagePath, pointcloudPath, cachePath;
+	FileLoader<cv::Mat> imageLoader;
+
+	boost::filesystem::path pointcloudPath, cachePath, framePath;
 
 	Frame(int index, int db_id) :
 			index(index), dbId(db_id) {
 	}
 
-	void setDepthmapPath(boost::filesystem::path path) {
-		depthmapPath = path;
+	void setPath(boost::filesystem::path path){
+		framePath = path;
 	}
-	void setImagePath(boost::filesystem::path path) {
-		imagePath = path;
+
+	void setImageLoader(FileLoader<cv::Mat> loader) {
+		imageLoader = loader;
 	}
 	void setPointcloudPath(boost::filesystem::path path) {
 		pointcloudPath = path;

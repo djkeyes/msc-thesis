@@ -38,9 +38,8 @@ double epsilon_angle_deg;
 double epsilon_translation;
 string slam_method;
 
-tuple<Mat, int, int> getDummyCalibration(const string& filename) {
+tuple<Mat, int, int> getDummyCalibration(Mat probe_image) {
 	int img_width, img_height;
-	Mat probe_image = imread(filename);
 	img_width = probe_image.cols;
 	img_height = probe_image.rows;
 
@@ -122,7 +121,8 @@ public:
 				// these files are in the format frame-XXXXXX.color.png
 				int id = stoi(name.substr(6, 6));
 				unique_ptr<Frame> frame(new sdl::Frame(id, cur_db.db_id));
-				frame->setImagePath(file);
+				frame->setImageLoader([file]() {return imread(file.path().string());});
+				frame->setPath(sequence_dir);
 				if (!cache.empty()) {
 					string image_filename(file.path().string());
 					frame->setCachePath(cache / sequence_dir.filename());
@@ -135,7 +135,7 @@ public:
 
 			sort(sorted_images.begin(), sorted_images.end());
 			if(slam_method.find("DSO") == 0) {
-				auto calib = getDummyCalibration(sorted_images[0]);
+				auto calib = getDummyCalibration(imread(sorted_images[0]));
 				Mat K = get<0>(calib);
 				int width = get<1>(calib);
 				int height = get<2>(calib);
@@ -150,8 +150,10 @@ public:
 	}
 
 	virtual void loadGroundTruthPose(const sdl::Frame& frame, Mat& rotation, Mat& translation) {
-		// frame-XXXXXX.color.png -> frame-XXXXXX.pose.txt
-		fs::path pose_path = frame.imagePath.parent_path() / frame.imagePath.stem().stem();
+		// frame i in db j -> seq-(j+1)/frame-XXXXXi.pose.txt
+		stringstream ss;
+		ss << "frame-" << setfill('0') << setw(6) << frame.index << ".pose.txt";
+		fs::path pose_path = frame.framePath / ss.str();
 		// operator+= is defined, but not operator+. Weird, eh?
 		pose_path += ".pose.txt";
 
@@ -222,7 +224,13 @@ public:
 				// these files are in the format XXXXX.jpg
 				int id = stoi(name.substr(0, 5));
 				unique_ptr<Frame> frame(new sdl::Frame(id, cur_db.db_id));
-				frame->setImagePath(file);
+				frame->setPath(sequence_dir);
+				// TODO(daniel)
+				throw runtime_error("TODO: load images for TUM dataset. Either "
+						"we should provide a function for loading from a zip "
+						"file, or (better) we should acquire the undistorted "
+						"image.");
+//				frame->setImagePath(file);
 				if (!cache.empty()) {
 					string image_filename(file.path().string());
 					frame->setCachePath(cache / sequence_dir.filename());
@@ -640,7 +648,6 @@ int main(int argc, char** argv) {
 
 	parseArguments(argc, argv);
 
-	string datadir(argv[1]);
 	vector<sdl::Database> dbs;
 	vector<sdl::Query> queries;
 
@@ -683,7 +690,7 @@ int main(int argc, char** argv) {
 
 	// TODO: use an actually calibrated camera model
 	// supposedly COLMAP can estimate calibration from video as part of its optimization?
-	Mat K = get<0>(getDummyCalibration(queries[0].getFrame()->imagePath.string()));
+	Mat K = get<0>(getDummyCalibration(queries[0].getFrame()->imageLoader()));
 	matching_method->setK(K);
 
 	int num_to_return = 8;
@@ -734,7 +741,7 @@ int main(int argc, char** argv) {
 						} else {
 							// load db match
 							int index = cols * r + c - 1;
-							image = imread(results[index].frame.imagePath.string());
+							image = results[index].frame.imageLoader();
 							stringstream ss;
 							ss << "rank=" << index;
 							text = ss.str();
@@ -760,7 +767,7 @@ int main(int argc, char** argv) {
 					resize(query_image, query_image, Size(width / 2, height));
 					query_image.copyTo(img(Rect(0, 0, width / 2, height)));
 
-					Mat db_image = imread(top_result.frame.imagePath.string());
+					Mat db_image = top_result.frame.imageLoader();
 					resize(db_image, db_image, Size(width / 2, height));
 					db_image.copyTo(img(Rect(width / 2, 0, width / 2, height)));
 

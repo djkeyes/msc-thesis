@@ -292,7 +292,7 @@ int Database::computeDescriptorsForEachFrame(map<int, vector<KeyPoint>>& image_k
 	// iterate through the images
 	for (const auto& element : *frames) {
 		const auto& frame = element.second;
-		Mat colorImage = imread(frame->imagePath.string());
+		Mat colorImage = frame->imageLoader();
 
 		image_keypoints[frame->index] = vector<KeyPoint>();
 		image_descriptors.insert(make_pair(frame->index, Mat()));
@@ -679,7 +679,7 @@ Query::Query(const unsigned int parent_database_id, const Frame * frame) :
 
 void Query::computeFeatures() {
 	if (!frame->loadDescriptors(keypoints, descriptors)) {
-		Mat colorImage = imread(frame->imagePath.string());
+		Mat colorImage = frame->imageLoader();
 
 		if (detectFromDepthMaps) {
 			throw runtime_error("computeFeatures() for query with 3D points "
@@ -701,7 +701,7 @@ void Query::setupFeatureDetector(bool detect_from_depth_maps) {
 }
 
 const Mat Query::readColorImage() const {
-	return imread(frame->imagePath.string());
+	return frame->imageLoader();
 }
 const vector<KeyPoint>& Query::getKeypoints() const {
 	return keypoints;
