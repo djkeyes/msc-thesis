@@ -30,6 +30,7 @@ using namespace std;
 using namespace sdl;
 using namespace cv;
 
+bool use_second_best_for_debugging = false;
 bool display_top_matching_images = false;
 bool save_first_trajectory = true;
 bool display_stereo_correspondences = true;
@@ -759,7 +760,7 @@ int main(int argc, char** argv) {
 			}
 
 			vector<sdl::Result> results = dbs[i].lookup(queries[j], num_to_return);
-			sdl::Result& top_result = results[0];
+			sdl::Result& top_result = results[use_second_best_for_debugging ? 1 : 0];
 
 			// display the result in a pretty window
 			if (j < 5 && display_top_matching_images) {
