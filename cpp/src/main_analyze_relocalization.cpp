@@ -32,6 +32,7 @@ using namespace cv;
 
 bool display_top_matching_images = false;
 bool save_first_trajectory = true;
+bool display_stereo_correspondences = true;
 
 int vocabulary_size;
 double epsilon_angle_deg;
@@ -335,21 +336,54 @@ public:
 
 	void doMatching(const Query& q, const Result& top_result, bool same_database, const vector<Point2f>& query_pts,
 			const vector<Point2f>& database_pts) {
-		int num_inliers;
-		Mat R, t;
-		internalDoMatching(top_result, query_pts, database_pts, num_inliers, R, t);
+		Mat R, t, inlier_mask;
+		internalDoMatching(top_result, query_pts, database_pts, inlier_mask, R, t);
 
-		updateResults(q, top_result, same_database, num_inliers, R, t);
+		updateResults(q, top_result, same_database, inlier_mask, R, t, query_pts, database_pts);
 	}
 
 	void setK(Mat K_) {
 		K = K_;
 	}
 
-	void updateResults(const Query& q, const Result& top_result, bool same_database, int num_inliers, Mat R, Mat t) {
+	void updateResults(const Query& q, const Result& top_result, bool same_database, Mat inlier_mask, Mat R, Mat t,
+			const vector<Point2f>& query_pts, const vector<Point2f>& database_pts) {
+
+		static int num_displayed = 0;
+		if (display_stereo_correspondences && num_displayed < 5) {
+			Mat query = q.getFrame()->imageLoader();
+			Mat result = top_result.frame.imageLoader();
+			Mat stereo;
+			stereo.create(query.rows, query.cols + result.cols, query.type());
+			query.copyTo(stereo.colRange(0, query.cols));
+			result.copyTo(stereo.colRange(query.cols, query.cols + result.cols));
+
+			Point2f offset(query.cols, 0);
+			for (int i = 0; i < inlier_mask.rows; ++i) {
+				Scalar color;
+				if (inlier_mask.at<int32_t>(i, 0) > 0) {
+					color = Scalar(0, 255, 0);
+				} else {
+					color = Scalar(0, 0, 255);
+				}
+
+				line(stereo, query_pts[i], database_pts[i] + offset, color);
+			}
+
+			stringstream ss;
+			ss << "Stereo correspondences for query " << q.getFrame()->index << "(db " << q.getFrame()->dbId << ") <==> result "
+					<< top_result.frame.index << " (db " << top_result.frame.dbId << ")";
+			string window_name(ss.str());
+			namedWindow(window_name, WINDOW_AUTOSIZE);
+			imshow(window_name, stereo);
+			waitKey(0);
+			destroyWindow(window_name);
+
+			++num_displayed;
+		}
 
 		// should this threshold be a function of the ransac model DOF?
-		if (num_inliers >= 12) {
+		if (countNonZero(inlier_mask) >= 12) {
 			if (same_database) {
 				high_inlier_train_queries++;
 			} else {
@@ -456,7 +490,7 @@ public:
 
 protected:
 	virtual void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts,
-			const vector<Point2f>& database_pts, int& num_inliers, Mat& R, Mat& t) = 0;
+			const vector<Point2f>& database_pts, Mat& inlier_mask, Mat& R, Mat& t) = 0;
 
 	Mat K;
 
@@ -474,7 +508,7 @@ class Match_2d_2d_5point: public MatchingMethod {
 		return false;
 	}
 
-	void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts, const vector<Point2f>& database_pts, int& num_inliers,
+	void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts, const vector<Point2f>& database_pts, Mat& inlier_mask,
 			Mat& R, Mat& t) override {
 		int ransac_threshold = 3; // in pixels, for the sampson error
 		// TODO: the number of inliers registered for trainset images is
@@ -486,9 +520,8 @@ class Match_2d_2d_5point: public MatchingMethod {
 		double confidence = 0.999999;
 
 		// pretty sure this is the correct order
-		Mat inlier_mask;
 		Mat E = findEssentialMat(database_pts, query_pts, K, RANSAC, confidence, ransac_threshold, inlier_mask);
-		num_inliers = recoverPose(E, database_pts, query_pts, K, R, t, inlier_mask);
+		recoverPose(E, database_pts, query_pts, K, R, t, inlier_mask);
 		// watch out: E, R, & t are double precision (even though we only ever passed floats)
 
 		// Convert from project matrix parameters (world to camera) to camera pose (camera to world)
@@ -507,7 +540,7 @@ class Match_2d_3d_dlt: public MatchingMethod {
 		return false;
 	}
 
-	void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts, const vector<Point2f>& database_pts, int& num_inliers,
+	void internalDoMatching(const Result& top_result, const vector<Point2f>& query_pts, const vector<Point2f>& database_pts, Mat& inlier_mask,
 			Mat& R, Mat& t) override {
 
 		int num_iters = 1000;
@@ -523,12 +556,11 @@ class Match_2d_3d_dlt: public MatchingMethod {
 					scene_coords.value<Point3f>(static_cast<int>(point.y), static_cast<int>(point.x)));
 		}
 
-		Mat rvec, inlier_mask;
+		Mat rvec, inliers;
 
 		solvePnPRansac(scene_coord_vec, query_pts, K, noArray(), rvec, t, false, num_iters, ransac_threshold, confidence,
-				inlier_mask);
+				inliers);
 		Rodrigues(rvec, R);
-		num_inliers = countNonZero(inlier_mask);
 
 		R.convertTo(R, CV_32F);
 		t.convertTo(t, CV_32F);
@@ -537,6 +569,10 @@ class Match_2d_3d_dlt: public MatchingMethod {
 		R = R.t();
 		t = -R * t;
 
+		inlier_mask = Mat::zeros(query_pts.size(), 1, CV_32SC1);
+		for (int i = 0; i < inliers.rows; ++i) {
+			inlier_mask.at<int32_t>(inliers.at<int32_t>(i, 0)) = 1;
+		}
 	}
 };
 // TODO: direct 3D-3D matching using depth maps? Or 3D-2D matching using a
