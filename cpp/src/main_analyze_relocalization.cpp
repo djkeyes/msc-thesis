@@ -722,14 +722,14 @@ int main(int argc, char** argv) {
 		// the cached depth map, which would be fine for cross-database queries)
 		query.setupFeatureDetector(matching_method->needs3dQueryPoints());
 		query.setDescriptorExtractor(sift);
-		query.computeFeatures();
+		query.computeDescriptors();
 	}
 
 	// Ideally most queries should be valid. :(
 	// If this is nonzero, it's probably due to a lack of keyframe density
 	// during visual odometry, and discarding empty frames isn't so bad.
 	int orig_query_count = queries.size();
-	queries.erase(std::remove_if(queries.begin(), queries.end(), [](Query& q) {return q.getDescriptors().empty();}),
+	queries.erase(std::remove_if(queries.begin(), queries.end(), [](Query& q) {return q.getKeypoints().empty();}),
 			queries.end());
 	int pruned_query_count = queries.size();
 	cout << "Have " << pruned_query_count << " valid queries after removing " << (orig_query_count - pruned_query_count)

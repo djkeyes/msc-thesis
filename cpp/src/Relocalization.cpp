@@ -179,13 +179,13 @@ Database::Database() :
 Database::Database(Database&&) = default;
 Database::~Database() = default;
 
-vector<Result> Database::lookup(const Query& query, unsigned int num_to_return) {
+vector<Result> Database::lookup(Query& query, unsigned int num_to_return) {
 
 	vector<int> assignments;
-	bowExtractor->computeAssignments(query.getDescriptors(), assignments);
+	const Mat descriptors = query.computeDescriptors();
+	bowExtractor->computeAssignments(descriptors, assignments);
 
 	const vector<KeyPoint>& keypoints = query.getKeypoints();
-	const Mat& descriptors = query.getDescriptors();
 	int num_features = keypoints.size();
 
 	int descriptor_size = descriptorExtractor->descriptorSize();
@@ -677,7 +677,20 @@ Query::Query(const unsigned int parent_database_id, const Frame * frame) :
 		parent_database_id(parent_database_id), frame(frame), detectFromDepthMaps(false) {
 }
 
-void Query::computeFeatures() {
+void Query::setDescriptorExtractor(Ptr<DescriptorExtractor> descriptor_extractor) {
+	descriptorExtractor = descriptor_extractor;
+}
+
+void Query::setupFeatureDetector(bool detect_from_depth_maps) {
+	detectFromDepthMaps = detect_from_depth_maps;
+}
+
+const Mat Query::readColorImage() const {
+	return frame->imageLoader();
+}
+const Mat Query::computeDescriptors() {
+	Mat descriptors;
+	keypoints.clear();
 	if (!frame->loadDescriptors(keypoints, descriptors)) {
 		Mat colorImage = frame->imageLoader();
 
@@ -691,23 +704,11 @@ void Query::computeFeatures() {
 		descriptorExtractor->compute(colorImage, keypoints, descriptors);
 		frame->saveDescriptors(keypoints, descriptors);
 	}
-}
-void Query::setDescriptorExtractor(Ptr<DescriptorExtractor> descriptor_extractor) {
-	descriptorExtractor = descriptor_extractor;
+	return descriptors;
 }
 
-void Query::setupFeatureDetector(bool detect_from_depth_maps) {
-	detectFromDepthMaps = detect_from_depth_maps;
-}
-
-const Mat Query::readColorImage() const {
-	return frame->imageLoader();
-}
 const vector<KeyPoint>& Query::getKeypoints() const {
 	return keypoints;
-}
-const Mat& Query::getDescriptors() const {
-	return descriptors;
 }
 
 }

@@ -74,12 +74,11 @@ class Query {
 public:
 	Query(const unsigned int parent_database_id, const Frame * frame);
 
-	void computeFeatures();
 	void setupFeatureDetector(bool detect_from_depth_map);
 	void setDescriptorExtractor(cv::Ptr<cv::DescriptorExtractor> descriptor_extractor);
 	const cv::Mat readColorImage() const;
 	const std::vector<cv::KeyPoint>& getKeypoints() const;
-	const cv::Mat& getDescriptors() const;
+	const cv::Mat computeDescriptors();
 
 	const unsigned int getParentDatabaseId() const {
 		return parent_database_id;
@@ -95,7 +94,6 @@ private:
 	bool detectFromDepthMaps;
 	cv::Ptr<cv::DescriptorExtractor> descriptorExtractor;
 	std::vector<cv::KeyPoint> keypoints;
-	cv::Mat descriptors;
 
 };
 
@@ -107,7 +105,7 @@ public:
 
 	void addFrame(std::unique_ptr<Frame> frame);
 
-	std::vector<Result> lookup(const Query& query, unsigned int num_to_return);
+	std::vector<Result> lookup(Query& query, unsigned int num_to_return);
 
 	void setVocabularySize(int size) {
 		vocabulary_size = size;
