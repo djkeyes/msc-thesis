@@ -30,7 +30,7 @@ using namespace std;
 using namespace sdl;
 using namespace cv;
 
-bool use_second_best_for_debugging = false;
+bool use_second_best_for_debugging = true;
 bool display_top_matching_images = false;
 bool save_first_trajectory = true;
 bool display_stereo_correspondences = true;
@@ -545,7 +545,7 @@ class Match_2d_3d_dlt: public MatchingMethod {
 			Mat& R, Mat& t) override {
 
 		int num_iters = 1000;
-		double confidence = 0.999999;
+		double confidence = 0.9999999;
 		double ransac_threshold = 8.0;
 
 		// lookup scene coords from database_pts
@@ -754,7 +754,7 @@ int main(int argc, char** argv) {
 			}
 			unsigned int total_so_far = total_test_queries + total_train_queries;
 			unsigned int total = dbs.size() * queries.size();
-			if (total_so_far % 100 == 0 || total_so_far == total) {
+			if (total_so_far % 10 == 0 || total_so_far == total) {
 				cout << "\r" << fixed << setprecision(4) << static_cast<double>(total_so_far) / total * 100. << "% ("
 						<< total_so_far << "/" << total << ")" << flush;
 			}
