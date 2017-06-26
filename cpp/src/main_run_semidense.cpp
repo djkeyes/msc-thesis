@@ -17,10 +17,11 @@ using sdl::DsoMapGenerator;
 using namespace std;
 
 namespace sdl {
-
 const string HELP_FLAG = "help";
 const string OUTPUT_PATH_FLAG = "output-path";
 const string INPUT_PATH_FLAG = "input-path";
+}  // namespace sdl
+
 template <typename T>
 ostream& operator<<(ostream& out, const vector<T>& vec) {
   bool first = true;
@@ -36,6 +37,10 @@ ostream& operator<<(ostream& out, const vector<T>& vec) {
   out << "]";
   return out;
 }
+
+using sdl::HELP_FLAG;
+using sdl::OUTPUT_PATH_FLAG;
+using sdl::INPUT_PATH_FLAG;
 
 int main(int argc, char** argv) {
   // Declare the supported options.
@@ -128,6 +133,3 @@ int main(int argc, char** argv) {
 
   return 0;
 }
-
-}  // namespace sdl
-

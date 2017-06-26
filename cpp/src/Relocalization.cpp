@@ -34,7 +34,7 @@ EIGEN_DEFINE_STL_VECTOR_SPECIALIZATION(
 
 namespace sdl {
 
-bool display_keypoints = true;
+bool display_keypoints = false;
 
 fs::path Frame::getDescriptorFilename() const {
   stringstream ss;
@@ -59,25 +59,25 @@ bool Frame::loadDescriptors(vector<KeyPoint>& keypointsOut,
   ifstream ifs(filename.string(), ios_base::in | ios_base::binary);
 
   uint32_t num_descriptors, descriptor_size, data_type;
-  ifs.read(static_cast<char*>(&num_descriptors), sizeof(uint32_t));
-  ifs.read(static_cast<char*>(&descriptor_size), sizeof(uint32_t));
-  ifs.read(static_cast<char*>(&data_type), sizeof(uint32_t));
+  ifs.read(reinterpret_cast<char*>(&num_descriptors), sizeof(uint32_t));
+  ifs.read(reinterpret_cast<char*>(&descriptor_size), sizeof(uint32_t));
+  ifs.read(reinterpret_cast<char*>(&data_type), sizeof(uint32_t));
 
   descriptorsOut.create(num_descriptors, descriptor_size, data_type);
-  ifs.read(static_cast<char*>(descriptorsOut.data),
+  ifs.read(reinterpret_cast<char*>(descriptorsOut.data),
            num_descriptors * descriptor_size * descriptorsOut.elemSize());
 
   keypointsOut.reserve(num_descriptors);
-  for (int i = 0; i < num_descriptors; i++) {
+  for (unsigned int i = 0; i < num_descriptors; i++) {
     float x, y, size, angle, response;
     uint32_t octave, class_id;
-    ifs.read(static_cast<char*>(&x), sizeof(float));
-    ifs.read(static_cast<char*>(&y), sizeof(float));
-    ifs.read(static_cast<char*>(&size), sizeof(float));
-    ifs.read(static_cast<char*>(&angle), sizeof(float));
-    ifs.read(static_cast<char*>(&response), sizeof(float));
-    ifs.read(static_cast<char*>(&octave), sizeof(uint32_t));
-    ifs.read(static_cast<char*>(&class_id), sizeof(uint32_t));
+    ifs.read(reinterpret_cast<char*>(&x), sizeof(float));
+    ifs.read(reinterpret_cast<char*>(&y), sizeof(float));
+    ifs.read(reinterpret_cast<char*>(&size), sizeof(float));
+    ifs.read(reinterpret_cast<char*>(&angle), sizeof(float));
+    ifs.read(reinterpret_cast<char*>(&response), sizeof(float));
+    ifs.read(reinterpret_cast<char*>(&octave), sizeof(uint32_t));
+    ifs.read(reinterpret_cast<char*>(&class_id), sizeof(uint32_t));
     keypointsOut.emplace_back(x, y, size, angle, response, octave, class_id);
   }
 
@@ -100,22 +100,22 @@ void Frame::saveDescriptors(const vector<KeyPoint>& keypoints,
   int num_descriptors = descriptors.size().height;
   int data_type = descriptors.type();
 
-  ofs.write(static_cast<char*>(&num_descriptors), sizeof(uint32_t));
-  ofs.write(static_cast<char*>(&descriptor_size), sizeof(uint32_t));
-  ofs.write(static_cast<char*>(&data_type), sizeof(uint32_t));
+  ofs.write(reinterpret_cast<const char*>(&num_descriptors), sizeof(uint32_t));
+  ofs.write(reinterpret_cast<const char*>(&descriptor_size), sizeof(uint32_t));
+  ofs.write(reinterpret_cast<const char*>(&data_type), sizeof(uint32_t));
 
-  ofs.write(static_cast<char*>(descriptors.data),
+  ofs.write(reinterpret_cast<const char*>(descriptors.data),
             num_descriptors * descriptor_size * descriptors.elemSize());
   for (int i = 0; i < num_descriptors; i++) {
     uint32_t octave(keypoints[i].octave);
     uint32_t class_id(keypoints[i].class_id);
-    ofs.write(static_cast<char*>(&keypoints[i].pt.x), sizeof(float));
-    ofs.write(static_cast<char*>(&keypoints[i].pt.y), sizeof(float));
-    ofs.write(static_cast<char*>(&keypoints[i].size), sizeof(float));
-    ofs.write(static_cast<char*>(&keypoints[i].angle), sizeof(float));
-    ofs.write(static_cast<char*>(&keypoints[i].response), sizeof(float));
-    ofs.write(static_cast<char*>(&octave), sizeof(uint32_t));
-    ofs.write(static_cast<char*>(&class_id), sizeof(uint32_t));
+    ofs.write(reinterpret_cast<const char*>(&keypoints[i].pt.x), sizeof(float));
+    ofs.write(reinterpret_cast<const char*>(&keypoints[i].pt.y), sizeof(float));
+    ofs.write(reinterpret_cast<const char*>(&keypoints[i].size), sizeof(float));
+    ofs.write(reinterpret_cast<const char*>(&keypoints[i].angle), sizeof(float));
+    ofs.write(reinterpret_cast<const char*>(&keypoints[i].response), sizeof(float));
+    ofs.write(reinterpret_cast<const char*>(&octave), sizeof(uint32_t));
+    ofs.write(reinterpret_cast<const char*>(&class_id), sizeof(uint32_t));
   }
 
   ofs.close();
@@ -139,17 +139,17 @@ void Frame::saveSceneCoordinates(cv::SparseMat coordinate_map) const {
   uint32_t rows = coordinate_map.size(0);
   uint32_t cols = coordinate_map.size(1);
   uint32_t size = coordinate_map.nzcount();
-  ofs.write(static_cast<char*>(&rows), sizeof(uint32_t));
-  ofs.write(static_cast<char*>(&cols), sizeof(uint32_t));
-  ofs.write(static_cast<char*>(&size), sizeof(uint32_t));
+  ofs.write(reinterpret_cast<const char*>(&rows), sizeof(uint32_t));
+  ofs.write(reinterpret_cast<const char*>(&cols), sizeof(uint32_t));
+  ofs.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
   for (auto iter = coordinate_map.begin(); iter != coordinate_map.end();
        ++iter) {
     cv::Vec3f& val = iter.value<cv::Vec3f>();
     uint16_t row = iter.node()->idx[0];
     uint16_t col = iter.node()->idx[1];
-    ofs.write(static_cast<char*>(&row), sizeof(uint16_t));
-    ofs.write(static_cast<char*>(&col), sizeof(uint16_t));
-    ofs.write(static_cast<char*>(&val), sizeof(cv::Vec3f));
+    ofs.write(reinterpret_cast<const char*>(&row), sizeof(uint16_t));
+    ofs.write(reinterpret_cast<const char*>(&col), sizeof(uint16_t));
+    ofs.write(reinterpret_cast<const char*>(&val), sizeof(cv::Vec3f));
   }
 
   ofs.close();
@@ -159,18 +159,18 @@ cv::SparseMat Frame::loadSceneCoordinates() const {
                ios_base::in | ios_base::binary);
 
   uint32_t rows, cols, size;
-  ifs.read(static_cast<char*>(&rows), sizeof(uint32_t));
-  ifs.read(static_cast<char*>(&cols), sizeof(uint32_t));
-  ifs.read(static_cast<char*>(&size), sizeof(uint32_t));
+  ifs.read(reinterpret_cast<char*>(&rows), sizeof(uint32_t));
+  ifs.read(reinterpret_cast<char*>(&cols), sizeof(uint32_t));
+  ifs.read(reinterpret_cast<char*>(&size), sizeof(uint32_t));
   cv::SparseMat coordinate_map;
   int dims[] = {static_cast<int>(rows), static_cast<int>(cols)};
   coordinate_map.create(2, dims, CV_32FC3);
   for (int i = 0; i < static_cast<int>(size); ++i) {
     uint16_t row, col;
-    ifs.read(static_cast<char*>(&row), sizeof(uint16_t));
-    ifs.read(static_cast<char*>(&col), sizeof(uint16_t));
+    ifs.read(reinterpret_cast<char*>(&row), sizeof(uint16_t));
+    ifs.read(reinterpret_cast<char*>(&col), sizeof(uint16_t));
     cv::Vec3f val;
-    ifs.read(static_cast<char*>(&val), sizeof(cv::Vec3f));
+    ifs.read(reinterpret_cast<char*>(&val), sizeof(cv::Vec3f));
     coordinate_map.ref<cv::Vec3f>(static_cast<int>(row),
                                   static_cast<int>(col)) = val;
   }
@@ -207,7 +207,7 @@ vector<Result> Database::lookup(Query& query, unsigned int num_to_return) {
       num_features);
 
   for (int j = 0; j < num_features; ++j) {
-    Map<MatrixXf> descriptor(static_cast<float*>(descriptors.row(j).data),
+    Map<MatrixXf> descriptor(reinterpret_cast<float*>(descriptors.row(j).data),
                              descriptor_size, 1);
 
     pInvertedIndexImpl->invertedIndex.PrepareQueryDescriptor(
@@ -467,7 +467,7 @@ MatrixXf Database::computeHammingThresholds(
       // Ostensibly the opencv matrix is 1xD, and the eigen matrix needs
       // to be Dx1, but it doesn't really matter since it's 1-dimensional
       // and stored contiguously.
-      Map<MatrixXf> descriptor(static_cast<float*>(descriptors.row(j).data),
+      Map<MatrixXf> descriptor(reinterpret_cast<float*>(descriptors.row(j).data),
                                descriptor_size, 1);
 
       Eigen::Matrix<float, 64, 1> proj_sift = projection_matrix * descriptor;
@@ -616,7 +616,7 @@ void Database::buildInvertedIndex(
         throw runtime_error("Impossible word " + closest_word);
       }
 
-      Map<MatrixXf> descriptor(static_cast<float*>(descriptors.row(j).data),
+      Map<MatrixXf> descriptor(reinterpret_cast<float*>(descriptors.row(j).data),
                                descriptor_size, 1);
 
       inverted_index.AddEntry(entry, closest_word, descriptor);
@@ -689,12 +689,12 @@ bool Database::loadVocabulary(cv::Mat& vocabularyOut) const {
   ifstream ifs(filename.string(), ios_base::in | ios_base::binary);
 
   uint32_t rows, cols, size, type;
-  ifs.read(static_cast<char*>(&rows), sizeof(uint32_t));
-  ifs.read(static_cast<char*>(&cols), sizeof(uint32_t));
-  ifs.read(static_cast<char*>(&size), sizeof(uint32_t));
-  ifs.read(static_cast<char*>(&type), sizeof(uint32_t));
+  ifs.read(reinterpret_cast<char*>(&rows), sizeof(uint32_t));
+  ifs.read(reinterpret_cast<char*>(&cols), sizeof(uint32_t));
+  ifs.read(reinterpret_cast<char*>(&size), sizeof(uint32_t));
+  ifs.read(reinterpret_cast<char*>(&type), sizeof(uint32_t));
   vocabularyOut.create(rows, cols, type);
-  ifs.read(static_cast<char*>(vocabularyOut.data), rows * cols * size);
+  ifs.read(reinterpret_cast<char*>(vocabularyOut.data), rows * cols * size);
 
   ifs.close();
 
@@ -713,11 +713,11 @@ void Database::saveVocabulary(const cv::Mat& vocabulary) const {
 
   uint32_t size(vocabulary.elemSize());
   uint32_t type(vocabulary.type());
-  ofs.write(static_cast<char*>(&vocabulary.rows), sizeof(uint32_t));
-  ofs.write(static_cast<char*>(&vocabulary.cols), sizeof(uint32_t));
-  ofs.write(static_cast<char*>(&size), sizeof(uint32_t));
-  ofs.write(static_cast<char*>(&type), sizeof(uint32_t));
-  ofs.write(static_cast<char*>(vocabulary.data),
+  ofs.write(reinterpret_cast<const char*>(&vocabulary.rows), sizeof(uint32_t));
+  ofs.write(reinterpret_cast<const char*>(&vocabulary.cols), sizeof(uint32_t));
+  ofs.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+  ofs.write(reinterpret_cast<const char*>(&type), sizeof(uint32_t));
+  ofs.write(reinterpret_cast<const char*>(vocabulary.data),
             vocabulary.rows * vocabulary.cols * size);
 
   ofs.close();

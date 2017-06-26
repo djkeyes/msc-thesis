@@ -37,7 +37,7 @@ namespace sdl {
 bool use_second_best_for_debugging = true;
 bool display_top_matching_images = false;
 bool save_first_trajectory = true;
-bool display_stereo_correspondences = true;
+bool display_stereo_correspondences = false;
 
 int vocabulary_size;
 double epsilon_angle_deg;
@@ -735,26 +735,29 @@ void parseArguments(int argc, char** argv) {
     exit(1);
   }
 }
+
+}  // namespace sdl
+
 int main(int argc, char** argv) {
-  parseArguments(argc, argv);
+  sdl::parseArguments(argc, argv);
 
   vector<sdl::Database> dbs;
   vector<sdl::Query> queries;
 
-  scene_parser->parseScene(dbs, queries);
+  sdl::scene_parser->parseScene(dbs, queries);
 
   Ptr<Feature2D> sift = xfeatures2d::SIFT::create(20000, 3, 0.005, 80);
 
   Ptr<Feature2D> detector;
-  if (matching_method->needs3dDatabasePoints()) {
-    detector = Ptr<Feature2D>(new NearestDescriptorAssigner(*sift));
+  if (sdl::matching_method->needs3dDatabasePoints()) {
+    detector = Ptr<Feature2D>(new sdl::NearestDescriptorAssigner(*sift));
   } else {
     detector = sift;
   }
 
   for (sdl::Database& db : dbs) {
-    db.setVocabularySize(vocabulary_size);
-    db.setupFeatureDetector(matching_method->needs3dDatabasePoints());
+    db.setVocabularySize(sdl::vocabulary_size);
+    db.setupFeatureDetector(sdl::matching_method->needs3dDatabasePoints());
     db.setDescriptorExtractor(detector);
     db.setBowExtractor(makePtr<BOWSparseImgDescriptorExtractor>(
         sift, FlannBasedMatcher::create()));
@@ -764,7 +767,7 @@ int main(int argc, char** argv) {
   for (sdl::Query& query : queries) {
     // TODO: incorporate previous frames into each query (or maybe just use
     // the cached depth map, which would be fine for cross-database queries)
-    query.setupFeatureDetector(matching_method->needs3dQueryPoints());
+    query.setupFeatureDetector(sdl::matching_method->needs3dQueryPoints());
     query.setDescriptorExtractor(sift);
     query.computeDescriptors();
   }
@@ -775,7 +778,7 @@ int main(int argc, char** argv) {
   int orig_query_count = queries.size();
   queries.erase(
       std::remove_if(queries.begin(), queries.end(),
-                     [](Query& q) { return q.getKeypoints().empty(); }),
+                     [](sdl::Query& q) { return q.getKeypoints().empty(); }),
       queries.end());
   int pruned_query_count = queries.size();
   cout << "Have " << pruned_query_count << " valid queries after removing "
@@ -784,8 +787,9 @@ int main(int argc, char** argv) {
   // TODO: use an actually calibrated camera model
   // supposedly COLMAP can estimate calibration from video as part of its
   // optimization?
-  Mat K = get<0>(getDummyCalibration(queries[0].getFrame()->imageLoader()));
-  matching_method->setK(K);
+  Mat K =
+      get<0>(sdl::getDummyCalibration(queries[0].getFrame()->imageLoader()));
+  sdl::matching_method->setK(K);
 
   int num_to_return = 8;
 
@@ -808,10 +812,11 @@ int main(int argc, char** argv) {
       }
 
       vector<sdl::Result> results = dbs[i].lookup(queries[j], num_to_return);
-      sdl::Result& top_result = results[use_second_best_for_debugging ? 1 : 0];
+      sdl::Result& top_result =
+          results[sdl::use_second_best_for_debugging ? 1 : 0];
 
       // display the result in a pretty window
-      if (j < 5 && display_top_matching_images) {
+      if (j < 5 && sdl::display_top_matching_images) {
         int width = 640, height = 640;
         int rows = 3, cols = 3;
         int bordersize = 3;
@@ -910,16 +915,14 @@ int main(int argc, char** argv) {
         database_pts.push_back(result_keypoints[correspondence.trainIdx].pt);
       }
 
-      matching_method->doMatching(
+      sdl::matching_method->doMatching(
           queries[j], top_result,
           queries[j].getParentDatabaseId() == dbs[i].db_id, query_pts,
           database_pts);
     }
   }
 
-  matching_method->printResults(total_train_queries, total_test_queries);
+  sdl::matching_method->printResults(total_train_queries, total_test_queries);
 
   return 0;
 }
-
-}  // namespace sdl

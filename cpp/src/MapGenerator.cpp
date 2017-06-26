@@ -82,7 +82,7 @@ class SimpleReader : public DsoDatasetReader {
     // need to perform global initialization
     cv::Mat K_;
     K.convertTo(K_, CV_32F);
-    Eigen::Map<Eigen::Matrix3f> K_as_eigen(static_cast<float*>(K_.data));
+    Eigen::Map<Eigen::Matrix3f> K_as_eigen(reinterpret_cast<float*>(K_.data));
     setGlobalCalib(width, height, K_as_eigen);
   }
   ~SimpleReader() = default;
