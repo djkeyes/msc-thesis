@@ -267,9 +267,6 @@ void Database::setBowExtractor(
     Ptr<BOWSparseImgDescriptorExtractor> bow_extractor) {
   bowExtractor = bow_extractor;
 }
-void Database::setMapper(unique_ptr<MapGenerator> map_gen) {
-  mapGen = move(map_gen);
-}
 
 void Database::doMapping() {
   if (!needToRecomputeSceneCoordinates()) {
@@ -299,7 +296,7 @@ void Database::doMapping() {
   mapGen->savePointCloudAsPly((cachePath / "pointcloud.ply").string());
 
   // clear mapGen, since it hogs a bunch of memory
-  mapGen.release();
+  mapGen.reset();
 }
 bool Database::needToRecomputeSceneCoordinates() const {
   unsigned int num_saved_coords = 0;
