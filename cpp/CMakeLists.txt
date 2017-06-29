@@ -126,6 +126,31 @@ target_link_libraries(main_analyze_relocalization
     GeometricBurstinessHeaders
 )
 
+
+add_executable(create_descriptor_training_data
+    src/LargeBagOfWords.h
+    src/Relocalization.h
+    src/MapGenerator.h
+    src/Datasets.h
+    
+    src/LargeBagOfWords.cpp
+    src/Relocalization.cpp
+    src/MapGenerator.cpp
+    src/Datasets.cpp
+    src/create_descriptor_training_data.cpp
+)
+
+target_link_libraries(create_descriptor_training_data
+    ${DSO_LIBRARY}
+    ${LIBZIP_LIBRARY}
+    ${OpenCV_LIBS}
+    boost_filesystem
+    boost_program_options
+    ${PCL_COMMON_LIBRARIES}
+    ${PCL_IO_LIBRARIES}
+    GeometricBurstinessHeaders
+)
+
 add_executable(test_approx_kmeans
     src/LargeBagOfWords.h
     

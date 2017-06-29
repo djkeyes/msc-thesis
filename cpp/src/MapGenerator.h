@@ -71,6 +71,7 @@ class DsoMapGenerator : public MapGenerator {
   int getNumImages();
 
   std::map<int, cv::SparseMat> getSceneCoordinateMaps() override;
+  std::map<int, dso::SE3*>* getPoses() { return poses.get(); }
 
  private:
   void parseArgument(char* arg, std::string& source, std::string& calib,

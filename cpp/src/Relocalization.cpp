@@ -123,7 +123,7 @@ void Frame::saveDescriptors(const vector<KeyPoint>& keypoints,
 
 boost::filesystem::path Frame::getSceneCoordinateFilename() const {
   stringstream ss;
-  ss << "scene_coords_" << index << ".png";
+  ss << "sparse_scene_coords_" << setfill('0') << setw(6) << index << ".bin";
   return cachePath / ss.str();
 }
 void Frame::saveSceneCoordinates(cv::SparseMat coordinate_map) const {

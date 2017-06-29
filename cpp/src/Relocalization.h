@@ -91,6 +91,7 @@ class Database {
   ~Database();
 
   void addFrame(std::unique_ptr<Frame> frame);
+  std::map<int, std::unique_ptr<Frame>>* getFrames() { return frames.get(); }
 
   std::vector<Result> lookup(Query& query, unsigned int num_to_return);
 
@@ -110,6 +111,7 @@ class Database {
   void setMapper(MapGenerator* map_gen) {
     mapGen = std::unique_ptr<MapGenerator>(map_gen);
   }
+  MapGenerator* getMapper() { return mapGen.get(); }
 
   unsigned int db_id;
 
