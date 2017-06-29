@@ -105,11 +105,13 @@ add_executable(main_analyze_relocalization
     src/LargeBagOfWords.h
     src/MapGenerator.h
     src/FusedFeatureDescriptors.h
+    src/Datasets.h
     
     src/LargeBagOfWords.cpp
     src/Relocalization.cpp
     src/MapGenerator.cpp
     src/FusedFeatureDescriptors.cpp
+    src/Datasets.cpp
     src/main_analyze_relocalization.cpp
 )
 
