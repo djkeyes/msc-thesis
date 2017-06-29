@@ -343,8 +343,8 @@ void parseArguments(int argc, char** argv) {
           " to be considered accurate.")
       ("mapping_method", po::value<string>()->default_value(""), "Mapping/SLAM method for building a map"
           " to relocalize against. Can be 'DSO' or left empty.")
-      ("pose_estimation_method", po::value<string>()->default_value(""), "Mapping/SLAM method for building a map"
-          " to relocalize against. Can be '5point_E' to decompose an essential matrix (and use the ground-truth scale),"
+      ("pose_estimation_method", po::value<string>()->default_value(""), "Robust estimation method to determine pose"
+          " after image retrieval. Can be '5point_E' to decompose an essential matrix (and use the ground-truth scale),"
           " 'DLT' to compute a direct linear transform (requires mapping_method to be specified), or left empty.");
 
   po::options_description commandline_args;
