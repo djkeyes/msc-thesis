@@ -139,6 +139,8 @@ int main(int argc, char** argv) {
 
   for (int i = dbs.size() - 1; i >= 0; --i) {
     auto& db = dbs[i];
+    cout << "Current results will be written to " << db.getCachePath().string()
+         << endl;
 
     sdl::DsoMapGenerator* map_gen =
         static_cast<sdl::DsoMapGenerator*>(db.getMapper());
