@@ -91,12 +91,12 @@ class ImageVertexTransformLayer(caffe.Layer):
 
 
   def genTrainData(self):
-    # for now, just choose two adjacent frames
-    # TODO: choose arbitrary covisible frames?
-    prev_image = None
-    prev_scene_coords = None
-    prev_transform = None
     for directory, frames in self.paths_by_directory.iteritems():
+      # for now, just choose two adjacent frames
+      # TODO: choose arbitrary covisible frames?
+      prev_image = None
+      prev_scene_coords = None
+      prev_transform = None
       for _, content_tuple in frames.iteritems():
         image_file = content_tuple[0]
         scene_coord_file = content_tuple[1]
