@@ -236,16 +236,18 @@ struct DsoOutputRecorder : public Output3DWrapper {
 
         float color = point->color[patternIdx] / 255.0;
 
-        Vec3 point3d(x, y, z);
+        Vec3 point3_cam(x, y, z);
+        Vec3 point3_world = camToWorld * point3_cam;
 
-        coloredPoints->push_back(make_pair(camToWorld * point3d, color));
-        current_points->push_back(make_pair(point3d, color));
+        coloredPoints->push_back(make_pair(point3_world, color));
+        current_points->push_back(make_pair(point3_cam, color));
 
         sceneCoordMap.ref<cv::Vec3f>(static_cast<int>(point->v),
                                      static_cast<int>(point->u)) =
-            cv::Vec3f(x, y, z);
+            cv::Vec3f(point3_world.x(), point3_world.y(), point3_world.z());
       }
     }
+
     pointsWithViewpointsById->insert(
         make_pair(frame_id, make_pair(camToWorld, move(current_points))));
     sceneCoordinateMaps->insert(make_pair(frame_id, sceneCoordMap));
