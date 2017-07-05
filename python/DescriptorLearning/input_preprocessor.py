@@ -7,6 +7,7 @@ import struct
 from caffe.io import load_image
 
 import numpy as np
+from skimage.draw import line
 
 import caffe
 
@@ -130,6 +131,45 @@ class ImageVertexTransformLayer(caffe.Layer):
       raise Exception('must specify a data directory')
 
     image_A, image_B, scene_coords_A, scene_coords_B, transform_A, transform_B = next(self.data_generator)
+
+    stereo = np.hstack([image_A, image_B])
+    num_oob = 0
+    count = 0
+    for row in range(image_A.shape[0]):
+      for col in range(image_A.shape[1]):
+        coords = scene_coords_A[row, col, :]
+        if np.isnan(coords[0]):
+          continue
+        count += 1
+
+        projected_B = transform_B.dot(np.append(coords, 1))
+        projected_A = transform_A.dot(np.append(coords, 1))
+        uB = int(round(projected_B[0]/projected_B[2]*153.6 + 191.5))
+        vB = int(round(projected_B[1]/projected_B[2]*152.64 + 143.5))
+
+        uA = int(round(projected_A[0]/projected_A[2]*153.6 + 191.5))
+        vA = int(round(projected_A[1]/projected_A[2]*152.64 + 143.5))
+
+        if uB < 0 or vB < 0 or uB >= image_A.shape[1] or vB >= image_A.shape[0] or projected_B[2] <= 0:
+          num_oob += 1
+          continue
+        if uA < 0 or vA < 0 or uA >= image_A.shape[1] or vA >= image_A.shape[0] or projected_A[2] <= 0:
+          num_oob += 1
+          continue
+        if count % 20 == 0:
+          rr, cc = line(row, col, vB, image_A.shape[1] + uB)
+          stereo[rr, cc, 0] = 0
+          stereo[rr, cc, 1] = 1.0
+          stereo[rr, cc, 2] = 0
+          rr, cc = line(row, col, vA, uA)
+          stereo[rr, cc, 0] = 1.0
+          stereo[rr, cc, 1] = 0
+          stereo[rr, cc, 2] = 0
+    print "num oob: ", num_oob, "/", count
+    # plt.imshow(stereo)
+    # plt.show()
+
+
     image_A = image_A.transpose([2, 0, 1])
     image_B = image_B.transpose([2, 0, 1])
 
