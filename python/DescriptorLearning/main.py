@@ -32,16 +32,17 @@ def vis_square(data):
 
 if __name__ == '__main__':
 
-  caffe.set_mode_cpu()
+  #caffe.set_mode_cpu()
   # initialize caffe for gpu mode
-  #caffe.set_mode_gpu()
-  #caffe.set_device(0)
+  caffe.set_mode_gpu()
+  caffe.set_device(0)
 
   workdir = './'
   if not os.path.isdir(workdir):
       os.makedirs(workdir)
 
   solver = caffe.SGDSolver(osp.join(workdir, 'solver.prototxt'))
+  #solver.restore('/home/daniel/experiments/denseCorrespondence/snap_iter_200.solverstate')
 
   solver.solve()
   #for i in range(5):
