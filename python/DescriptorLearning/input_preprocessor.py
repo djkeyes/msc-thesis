@@ -107,6 +107,18 @@ class ImageVertexTransformLayer(caffe.Layer):
 
         print np.count_nonzero(~np.isnan(scene_coords))/2, ' non-nan vectors'
         transform = read_transform(join(directory, transform_file)) # np.zeros([3, 4])
+
+        image = image.astype(np.float32)
+        scene_coords = scene_coords.astype(np.float32)
+        transform = transform.astype(np.float32)
+
+        if np.any(np.isnan(transform)):
+          # Sometimes transforms recorded from DSO can contain nan values. I
+          # assume this is because the underlying optimization is
+          # ill-conditioned
+          # TODO(daniel): find the root cause
+          continue
+
         if prev_image is not None:
           yield (prev_image, image, prev_scene_coords, scene_coords, prev_transform, transform)
         prev_image = image
