@@ -1,7 +1,9 @@
 
 from collections import OrderedDict
+from functools import partial
 from os import listdir
 from os.path import isdir, join
+import random
 import struct
 
 from caffe.io import load_image
@@ -34,7 +36,6 @@ def read_sparse_scene_coords(filename):
 
 
 def read_transform(filename):
-  print 'reading from ', filename
   rows = 3
   cols = 4
   result = np.zeros([rows, cols])
@@ -59,7 +60,8 @@ class ImageVertexTransformLayer(caffe.Layer):
   def __init__(self, layer_param):
     caffe.Layer.__init__(self, layer_param)
     self.data_dir = None
-    self.paths_by_directory = {}
+    self.data_loaders = []
+    self.needs_reshape = True
 
   def setup(self, bottom, top):
     self.data_dir = self.param_str
@@ -71,73 +73,43 @@ class ImageVertexTransformLayer(caffe.Layer):
     self.data_generator = self.genTrainData()
 
   def reshape(self,bottom,top):
-    top[2].reshape(1, 3, 4, 1)
-    if(self.data_dir is not None):
-      if not self.paths_by_directory:
-        self.load_paths()
-      # read one image to get the dimensions
-      first_dir = self.paths_by_directory.keys()[0]
-      first_dir_contents = self.paths_by_directory[first_dir]
-      first_image = first_dir_contents[first_dir_contents.keys()[0]][0]
-      img = load_image(join(self.paths_by_directory.keys()[0], first_image))
-      channels = img.shape[2]
-      height = img.shape[0]
-      width = img.shape[1]
-      top[0].reshape(2, channels, height, width)
-      top[1].reshape(2, channels, height, width)
-    else:
-      # dummy values
-      top[0].reshape(2, 3, 480, 640)
-      top[1].reshape(2, 3, 480, 640)
+    if self.needs_reshape:
+      self.needs_reshape = False
+      top[2].reshape(1, 3, 4, 1)
+      if(self.data_dir is not None):
+        if len(self.data_loaders) == 0:
+          self.load_paths()
+        # read one image to get the dimensions
+        for retry in range(5):
+          content = self.data_loaders[0]()
+          if content is not None:
+            break
+        img = content[0]
+        channels = img.shape[2]
+        height = img.shape[0]
+        width = img.shape[1]
+        top[0].reshape(2, channels, height, width)
+        top[1].reshape(2, channels, height, width)
+      else:
+        # dummy values
+        top[0].reshape(2, 3, 480, 640)
+        top[1].reshape(2, 3, 480, 640)
 
 
   def genTrainData(self):
-    for directory, frames in self.paths_by_directory.iteritems():
-      # for now, just choose two adjacent frames
-      # TODO: choose arbitrary covisible frames?
-      prev_image = None
-      prev_scene_coords = None
-      prev_transform = None
-      for _, content_tuple in frames.iteritems():
-        image_file = content_tuple[0]
-        scene_coord_file = content_tuple[1]
-        transform_file = content_tuple[2]
-        image = load_image(join(directory, image_file))
-        # TODO: the other two
-        scene_coords = read_sparse_scene_coords(join(directory, scene_coord_file)) # np.full([480, 640, 3], np.nan)
-
-        print np.count_nonzero(~np.isnan(scene_coords))/2, ' non-nan vectors'
-        transform = read_transform(join(directory, transform_file)) # np.zeros([3, 4])
-
-        image = image.astype(np.float32)
-        scene_coords = scene_coords.astype(np.float32)
-        transform = transform.astype(np.float32)
-
-        if np.any(np.isnan(transform)):
-          # Sometimes transforms recorded from DSO can contain nan values. I
-          # assume this is because the underlying optimization is
-          # ill-conditioned
-          # TODO(daniel): find the root cause
-          continue
-
-        if prev_image is not None:
-          yield (prev_image, image, prev_scene_coords, scene_coords, prev_transform, transform)
-        prev_image = image
-        prev_scene_coords = scene_coords
-        prev_transform = transform
+    while True:
+      for loader in self.data_loaders:
+        yield loader()
 
   def forward(self,bottom,top):
     if self.data_dir is None:
       raise Exception('must specify a data directory')
 
-    # Note: despite the rule-of-thumb to avoid controlling program logic using
-    # exceptions, this is the cannonically correct way to check for empty generators.
-    try:
-      image_A, image_B, scene_coords_A, scene_coords_B, transform_A, transform_B = next(self.data_generator)
-    except StopIteration:
-      self.data_generator = self.genTrainData()
-      image_A, image_B, scene_coords_A, scene_coords_B, transform_A, transform_B = next(self.data_generator)
-
+    for retries in range(100):
+      content = next(self.data_generator)
+      if content is not None:
+        break
+    image_A, scene_coords_A, transform_A, image_B, scene_coords_B, transform_B = content
     stereo = np.hstack([image_A, image_B])
     num_oob = 0
     count = 0
@@ -194,7 +166,7 @@ class ImageVertexTransformLayer(caffe.Layer):
     pass
 
   def load_paths(self):
-    self.paths_by_directory = {}
+    paths_by_directory = {}
     directories = [join(self.data_dir, d) for d in listdir(self.data_dir) if isdir(join(self.data_dir, d))]
     for dir in directories:
       images = sorted([file for file in listdir(dir) if file.startswith('image')])
@@ -208,4 +180,72 @@ class ImageVertexTransformLayer(caffe.Layer):
       for i in range(len(images)):
         frame_id = int(images[i][6:12])
         frames_to_paths[frame_id] = (images[i], scene_coords[i], poses[i])
-      self.paths_by_directory[dir] = frames_to_paths
+      paths_by_directory[dir] = frames_to_paths
+
+    # create a bunch of functors to load training data, so we can invoke them
+    # in shuffled order
+    self.data_loaders = []
+    for directory, frames in paths_by_directory.iteritems():
+      adj_list = {}
+      with open(join(directory, 'adjlist.txt')) as adj_list_file:
+        adj_list_frames = []
+        first = True
+        line_num = 0
+        for line in adj_list_file:
+          values = [int(num) for num in line.split()]
+          if first:
+            N = values[0]
+            adj_list_frames = values[1:]
+            first = False
+          else:
+            M = values[0]
+            adj_list[adj_list_frames[line_num]] = values[1:]
+            line_num += 1
+
+      for frame_id, content_tuple in frames.iteritems():
+        image_file = content_tuple[0]
+        scene_coord_file = content_tuple[1]
+        transform_file = content_tuple[2]
+        if frame_id not in adj_list:
+          continue
+
+        for adj_frame_id in adj_list[frame_id]:
+          if adj_frame_id not in frames:
+            continue
+          adj_content_tuple = frames[adj_frame_id]
+          adj_image_file = adj_content_tuple[0]
+          adj_scene_coord_file = adj_content_tuple[1]
+          adj_transform_file = adj_content_tuple[2]
+
+          loader = partial(load_twice, directory, image_file, scene_coord_file, transform_file, adj_image_file,
+                           adj_scene_coord_file, adj_transform_file)
+          self.data_loaders.append(loader)
+    random.shuffle(self.data_loaders)
+
+
+def load_twice(directory, image_file, scene_coord_file, transform_file, adj_image_file, adj_scene_coord_file,
+               adj_transform_file):
+  first = load_data(directory, image_file, scene_coord_file, transform_file)
+  second = load_data(directory, adj_image_file, adj_scene_coord_file, adj_transform_file)
+  if first is None or second is None:
+    return None
+  return first + second
+
+def load_data(directory, image_file, scene_coord_file, transform_file):
+  print 'reading from directory ', directory, ' image ', image_file
+  image = load_image(join(directory, image_file))
+  scene_coords = read_sparse_scene_coords(join(directory, scene_coord_file))  # np.full([480, 640, 3], np.nan)
+  print np.count_nonzero(~np.isnan(scene_coords)) / 2, ' non-nan vectors'
+  transform = read_transform(join(directory, transform_file))  # np.zeros([3, 4])
+
+  image = image.astype(np.float32)
+  scene_coords = scene_coords.astype(np.float32)
+  transform = transform.astype(np.float32)
+
+  if np.any(np.isnan(transform)):
+    # Sometimes transforms recorded from DSO can contain nan values. I
+    # assume this is because the underlying optimization is
+    # ill-conditioned
+    # TODO(daniel): find the root cause
+    return None
+  return (image, scene_coords, transform)
