@@ -136,6 +136,10 @@ struct DsoOutputRecorder : public Output3DWrapper {
   unique_ptr<map<int, unique_ptr<MinimalImageF>>> rgbImagesById;
   unique_ptr<map<int, SE3*>> posesById;
   unique_ptr<map<int, cv::SparseMat>> sceneCoordinateMaps;
+  const map<uint64_t, Eigen::Vector2i, less<uint64_t>,
+            Eigen::aligned_allocator<pair<uint64_t, Eigen::Vector2i>>>*
+      latestConnectivity;
+  unique_ptr<map<int, int>> frameIdToIncomingId;
 
   const double my_scaledTH = 1;      // 1e10;
   const double my_absTH = 1;         // 1e10;
@@ -148,20 +152,22 @@ struct DsoOutputRecorder : public Output3DWrapper {
         depthImagesById(new map<int, unique_ptr<MinimalImageF>>()),
         rgbImagesById(new map<int, unique_ptr<MinimalImageF>>()),
         posesById(new map<int, SE3*>()),
-        sceneCoordinateMaps(new map<int, cv::SparseMat>()) {}
+        sceneCoordinateMaps(new map<int, cv::SparseMat>()),
+        latestConnectivity(nullptr),
+        frameIdToIncomingId(new map<int, int>()) {}
 
   void publishGraph(
       const map<uint64_t, Eigen::Vector2i, less<uint64_t>,
                 Eigen::aligned_allocator<pair<uint64_t, Eigen::Vector2i>>>&
           connectivity) override {
-    // TODO(daniel): we could check the graph connectivity here to get
-    // covisibility
-    // of keypoints. This is a little sketchy though, since DSO is a direct
-    // method,
-    // so we aren't guaranteed that keypoint k in frame i will also project to a
-    // keypoint in frame j. On the other hand, if it doesn't project to a
-    // keypoint,
-    // we could just use that as an excuse to add a new keypoint to frame j.
+    // This contains frames with *any* covisible points. Technically, for two
+    // PointHessians x and y, we ought to check that x.host and y.host refer to
+    // the same object. But as long as they project to the same point, we're
+    // probably okay.
+
+    // connectivity is a field in FullSystem, so its pointer remains valid for
+    // the lifetime of FullSystem
+    latestConnectivity = &connectivity;
   }
 
   void printPoint(const PointHessian* const& point) {
@@ -280,6 +286,7 @@ struct DsoOutputRecorder : public Output3DWrapper {
         image->data[i] = fh->dI[i][0];
       }
       rgbImagesById->insert(make_pair(fh->shell->incoming_id, move(image)));
+      (*frameIdToIncomingId)[fh->frameID] = fh->shell->incoming_id;
     }
   }
 
@@ -492,6 +499,42 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
   poses = move(dso_recorder->posesById);
   sceneCoordinateMaps = move(dso_recorder->sceneCoordinateMaps);
 
+  const auto& connectivity = *dso_recorder->latestConnectivity;
+  map<int, int>& id_map = *dso_recorder->frameIdToIncomingId;
+  cameraAdjacencyList =
+      unique_ptr<map<int, set<int>>>(new map<int, set<int>>());
+  for (auto iter = connectivity.begin(); iter != connectivity.end(); ++iter) {
+    int first = static_cast<int>(iter->first >> 32);
+    int second = static_cast<int>(iter->first & ((1L << 32) - 1));
+
+    if (first == second) {
+      continue;
+    }
+
+    if ((id_map.find(first) == id_map.end()) ||
+        (id_map.find(second) == id_map.end())) {
+      continue;
+    }
+    first = id_map[first];
+    second = id_map[second];
+
+    int active_residuals = iter->second[0];
+    int marginalized_residuals = iter->second[1];
+
+    if (active_residuals + marginalized_residuals == 0) {
+      // no actual points in common
+      continue;
+    }
+
+    // Note: I think if frame A hosts points that are visible in both B and C, B
+    // and C might not be on each others' adjacency lists. Of course, end users
+    // could resolve this by treating both first-neighbors and second-neighbors
+    // are adjacent.
+
+    (*cameraAdjacencyList)[first].insert(second);
+    (*cameraAdjacencyList)[second].insert(first);
+  }
+
   if (print_debug_info) {
     printf("recorded %lu points!\n", pointcloud->size());
   }
@@ -500,6 +543,7 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
     ow->join();
   }
 }
+
 void DsoMapGenerator::savePointCloudAsPly(const string& filename) {
   string path(filename.substr(0, filename.rfind("/") + 1));
   // create directory if it doesn't exist
@@ -603,6 +647,32 @@ void DsoMapGenerator::saveDepthMaps(const string& filepath) {
     IOWrap::writeImage(filename_stream.str(), depthMap);
   }
 }
+
+void DsoMapGenerator::saveCameraAdjacencyList(const string& filename) const {
+  // Just write plaintext. These are ints, so there's no loss of precision.
+  ofstream out(filename, ios::out);
+  // First line: N, the number of cameras, followed by N unique camera ids
+  // N c1 c2 ... ci ... CN
+  // Next N lines: line i starts with Mi, the number of cameras adjacent to
+  // camera ci, followed by unique ids of cameras adjacent to ci.
+  // Mi c1 c2 ... cj ... cM
+  out << cameraAdjacencyList->size();
+  for (auto iter = cameraAdjacencyList->begin();
+       iter != cameraAdjacencyList->end(); ++iter) {
+    out << " " << iter->first;
+  }
+  out << endl;
+  for (auto first_iter = cameraAdjacencyList->begin();
+       first_iter != cameraAdjacencyList->end(); ++first_iter) {
+    out << first_iter->second.size();
+    for (auto second_iter = first_iter->second.begin();
+         second_iter != first_iter->second.end(); ++second_iter) {
+      out << " " << *second_iter;
+    }
+    out << endl;
+  }
+}
+
 void DsoMapGenerator::savePosesInWorldFrame(
     const string& gt_filename, const string& output_filename) const {
   ifstream ground_truth;

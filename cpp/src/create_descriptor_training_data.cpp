@@ -126,9 +126,6 @@ sdl::SceneParser* parseArguments(int argc, char** argv) {
 
 int main(int argc, char** argv) {
   unique_ptr<sdl::SceneParser> scene_parser(parseArguments(argc, argv));
-  // parse args (probably shouldn't abstract this, as it's executable-specific
-  // run on each dataset
-  // for each frame, save results
 
   vector<sdl::Database> dbs;
   vector<sdl::Query> queries;
@@ -181,6 +178,9 @@ int main(int argc, char** argv) {
                         sizeof(double) * transform.rows() * transform.cols());
       }
     }
+
+    map_gen->saveCameraAdjacencyList(
+        (db.getCachePath() / "adjlist.txt").string());
 
     // pop from the vector, so that old results are erased
     dbs.pop_back();

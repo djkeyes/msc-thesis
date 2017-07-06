@@ -7,6 +7,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <set>
 
 #include "opencv2/core/mat.hpp"
 
@@ -64,6 +65,7 @@ class DsoMapGenerator : public MapGenerator {
   void savePointCloudAsManyPcds(const std::string& filepath) override;
   void saveDepthMaps(const std::string& filepath) override;
 
+  void saveCameraAdjacencyList(const std::string& filename) const;
   void saveRawImages(const std::string& filepath) const;
   void savePosesInWorldFrame(const std::string& gt_filename,
                              const std::string& output_filename) const;
@@ -88,6 +90,7 @@ class DsoMapGenerator : public MapGenerator {
   std::unique_ptr<std::map<int, std::unique_ptr<dso::MinimalImageF>>> rgbImages;
   std::unique_ptr<std::map<int, dso::SE3*>> poses;
   std::unique_ptr<std::map<int, cv::SparseMat>> sceneCoordinateMaps;
+  std::unique_ptr<std::map<int, std::set<int>>> cameraAdjacencyList;
 
   std::unique_ptr<DsoDatasetReader> datasetReader;
 };
