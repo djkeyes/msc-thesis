@@ -140,6 +140,8 @@ struct DsoOutputRecorder : public Output3DWrapper {
             Eigen::aligned_allocator<pair<uint64_t, Eigen::Vector2i>>>*
       latestConnectivity;
   unique_ptr<map<int, int>> frameIdToIncomingId;
+  unique_ptr<map<int, list<Vec3>>> covisibleMarginalizedPoints;
+  CalibHessian* latestCalibHessian;
 
   const double my_scaledTH = 1;      // 1e10;
   const double my_absTH = 1;         // 1e10;
@@ -154,7 +156,9 @@ struct DsoOutputRecorder : public Output3DWrapper {
         posesById(new map<int, SE3*>()),
         sceneCoordinateMaps(new map<int, cv::SparseMat>()),
         latestConnectivity(nullptr),
-        frameIdToIncomingId(new map<int, int>()) {}
+        frameIdToIncomingId(new map<int, int>()),
+        covisibleMarginalizedPoints(new map<int, list<Vec3>>()),
+        latestCalibHessian(nullptr) {}
 
   void publishGraph(
       const map<uint64_t, Eigen::Vector2i, less<uint64_t>,
@@ -194,10 +198,27 @@ struct DsoOutputRecorder : public Output3DWrapper {
     double cxi = calib->cxli();
     double cyi = calib->cyli();
 
-    unique_ptr<list<ColoredPoint>> current_points(new list<ColoredPoint>());
-    int dims[] = {hG[0], wG[0]};
-    cv::SparseMat sceneCoordMap;
-    sceneCoordMap.create(2, dims, CV_32FC3);
+    auto local_points_iter = pointsWithViewpointsById->find(frame_id);
+    if (local_points_iter == pointsWithViewpointsById->end()) {
+      local_points_iter =
+          pointsWithViewpointsById
+              ->insert(make_pair(
+                  frame_id,
+                  make_pair(camToWorld, unique_ptr<list<ColoredPoint>>(
+                                            new list<ColoredPoint>()))))
+              .first;
+    }
+    list<ColoredPoint>* current_points = local_points_iter->second.second.get();
+
+    auto scene_points_iter = sceneCoordinateMaps->find(frame_id);
+    if (scene_points_iter == sceneCoordinateMaps->end()) {
+      int dims[] = {hG[0], wG[0]};
+      scene_points_iter =
+          sceneCoordinateMaps
+              ->insert(make_pair(frame_id, cv::SparseMat(2, dims, CV_32FC3)))
+              .first;
+    }
+    cv::SparseMat sceneCoordMap = scene_points_iter->second;
 
     for (PointHessian* point : points) {
       double z = 1.0 / point->idepth;
@@ -251,12 +272,31 @@ struct DsoOutputRecorder : public Output3DWrapper {
         sceneCoordMap.ref<cv::Vec3f>(static_cast<int>(point->v),
                                      static_cast<int>(point->u)) =
             cv::Vec3f(point3_world.x(), point3_world.y(), point3_world.z());
+
+        // also project into frames with known covisibility
+        for (PointFrameResidual* residual : point->residuals) {
+          // If the frame has already been marginalized, the target pointer is
+          // invalid. DSO performs this check for fh->pointHessians, but not
+          // for fh->pointHessiansMarginalized or other PointHessian vectors
+          if (sceneCoordinateMaps->find(residual->targetIncomingId) !=
+              sceneCoordinateMaps->end()) {
+            continue;
+          }
+          auto iter =
+              covisibleMarginalizedPoints->find(residual->targetIncomingId);
+          if (iter == covisibleMarginalizedPoints->end()) {
+            iter = covisibleMarginalizedPoints
+                       ->insert(make_pair(residual->targetIncomingId,
+                                          list<Vec3>()))
+                       .first;
+          }
+          iter->second.push_back(point3_world);
+
+          // Here would be a good place to verify that all frames in
+          // point.residuals are listed as covisible with each other
+        }
       }
     }
-
-    pointsWithViewpointsById->insert(
-        make_pair(frame_id, make_pair(camToWorld, move(current_points))));
-    sceneCoordinateMaps->insert(make_pair(frame_id, sceneCoordMap));
   }
 
   void publishKeyframes(vector<FrameHessian*>& frames, bool final,
@@ -288,6 +328,7 @@ struct DsoOutputRecorder : public Output3DWrapper {
       rgbImagesById->insert(make_pair(fh->shell->incoming_id, move(image)));
       (*frameIdToIncomingId)[fh->frameID] = fh->shell->incoming_id;
     }
+    latestCalibHessian = HCalib;
   }
 
   void publishCamPose(FrameShell* frame, CalibHessian* HCalib) override {
@@ -391,9 +432,8 @@ DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, int width, int height,
   setting_desiredImmatureDensity = 3000;
   setting_desiredPointDensity = 4000;
   // setting this higher than 1 forces more frames to be keyframes. Still, many
-  // frames
-  // are skipped for a variety of reasons. The most common is probably no camera
-  // movement / ill-conditioned depth estimation.
+  // frames are skipped for a variety of reasons. The most common is probably no
+  // camera movement / ill-conditioned depth estimation.
   setting_kfGlobalWeight = 2;
   setting_minFrames = 5;
   setting_maxFrames = 7;
@@ -533,6 +573,42 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
 
     (*cameraAdjacencyList)[first].insert(second);
     (*cameraAdjacencyList)[second].insert(first);
+  }
+
+  // project the covisible points, now that we actually have poses for every
+  // frame
+  CalibHessian* calib = dso_recorder->latestCalibHessian;
+  double fx = calib->fxl();
+  double fy = calib->fyl();
+  double cx = calib->cxl();
+  double cy = calib->cyl();
+  for (auto iter = dso_recorder->covisibleMarginalizedPoints->begin();
+       iter != dso_recorder->covisibleMarginalizedPoints->end(); ++iter) {
+    // TODO: could also patch up the depth images or pointcloudsWithViewpoints
+    // (which stores points in a local reference frame)
+
+    auto scene_coord_iter = sceneCoordinateMaps->find(iter->first);
+    auto pose_iter = poses->find(iter->first);
+    if (scene_coord_iter != sceneCoordinateMaps->end() &&
+        pose_iter != poses->end()) {
+      cv::SparseMat& scene_coords = scene_coord_iter->second;
+      SE3 world_to_cam = pose_iter->second->inverse();
+
+      for (Vec3& point : iter->second) {
+        // We could perform the same checks as in addPoints, but ostensibly
+        // these points have already been verified by DSO
+
+        // do camera projection
+        auto local = world_to_cam * point;
+        int u = static_cast<int>(round(local.x() / local.z() * fx + cx));
+        int v = static_cast<int>(round(local.y() / local.z() * fy + cy));
+
+        if (scene_coords.find<cv::Vec3f>(v, u) == nullptr) {
+          scene_coords.ref<cv::Vec3f>(v, u) =
+              cv::Vec3f(point.x(), point.y(), point.z());
+        }
+      }
+    }
   }
 
   if (print_debug_info) {
