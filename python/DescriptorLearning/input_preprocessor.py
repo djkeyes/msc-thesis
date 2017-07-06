@@ -130,7 +130,13 @@ class ImageVertexTransformLayer(caffe.Layer):
     if self.data_dir is None:
       raise Exception('must specify a data directory')
 
-    image_A, image_B, scene_coords_A, scene_coords_B, transform_A, transform_B = next(self.data_generator)
+    # Note: despite the rule-of-thumb to avoid controlling program logic using
+    # exceptions, this is the cannonically correct way to check for empty generators.
+    try:
+      image_A, image_B, scene_coords_A, scene_coords_B, transform_A, transform_B = next(self.data_generator)
+    except StopIteration:
+      self.data_generator = self.genTrainData()
+      image_A, image_B, scene_coords_A, scene_coords_B, transform_A, transform_B = next(self.data_generator)
 
     stereo = np.hstack([image_A, image_B])
     num_oob = 0
