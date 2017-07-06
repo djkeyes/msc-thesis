@@ -603,6 +603,11 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
         int u = static_cast<int>(round(local.x() / local.z() * fx + cx));
         int v = static_cast<int>(round(local.y() / local.z() * fy + cy));
 
+        if (u < 0 || v < 0 || u >= scene_coords.size(1) ||
+            v >= scene_coords.size(0) || local.z() <= 0) {
+          continue;
+        }
+
         if (scene_coords.find<cv::Vec3f>(v, u) == nullptr) {
           scene_coords.ref<cv::Vec3f>(v, u) =
               cv::Vec3f(point.x(), point.y(), point.z());
