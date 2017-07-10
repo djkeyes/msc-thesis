@@ -73,7 +73,7 @@ class DsoMapGenerator : public MapGenerator {
   int getNumImages();
 
   std::map<int, cv::SparseMat> getSceneCoordinateMaps() override;
-  std::map<int, dso::SE3*>* getPoses() { return poses.get(); }
+  std::map<int, dso::SE3>* getPoses() { return poses.get(); }
 
  private:
   void parseArgument(char* arg, std::string& source, std::string& calib,
@@ -88,7 +88,7 @@ class DsoMapGenerator : public MapGenerator {
   std::unique_ptr<std::map<int, std::unique_ptr<dso::MinimalImageF>>>
       depthImages;
   std::unique_ptr<std::map<int, std::unique_ptr<dso::MinimalImageF>>> rgbImages;
-  std::unique_ptr<std::map<int, dso::SE3*>> poses;
+  std::unique_ptr<std::map<int, dso::SE3>> poses;
   std::unique_ptr<std::map<int, cv::SparseMat>> sceneCoordinateMaps;
   std::unique_ptr<std::map<int, std::set<int>>> cameraAdjacencyList;
 

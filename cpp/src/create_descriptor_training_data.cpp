@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
     // maps
     map<int, cv::SparseMat> scene_coordinate_maps =
         map_gen->getSceneCoordinateMaps();
-    map<int, dso::SE3*>* poses = map_gen->getPoses();
+    map<int, dso::SE3>* poses = map_gen->getPoses();
 
     for (unsigned int frame_id = 0; frame_id < frames->size(); ++frame_id) {
       auto iter = scene_coordinate_maps.find(frame_id);
@@ -167,8 +167,8 @@ int main(int argc, char** argv) {
         ss << "image_" << setfill('0') << setw(6) << frame_id << ".png";
         cv::imwrite((f->cachePath / ss.str()).string(), image);
 
-        dso::SE3* pose = poses->at(frame_id);
-        Eigen::Matrix<double, 3, 4> transform = pose->matrix3x4();
+        dso::SE3& pose = poses->at(frame_id);
+        Eigen::Matrix<double, 3, 4> transform = pose.matrix3x4();
 
         ss.str("");
         ss << "pose_" << setfill('0') << setw(6) << frame_id << ".bin";

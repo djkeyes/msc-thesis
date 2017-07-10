@@ -139,7 +139,6 @@ add_executable(create_descriptor_training_data
     src/Datasets.cpp
     src/create_descriptor_training_data.cpp
 )
-
 target_link_libraries(create_descriptor_training_data
     ${DSO_LIBRARY}
     ${LIBZIP_LIBRARY}
@@ -151,13 +150,35 @@ target_link_libraries(create_descriptor_training_data
     GeometricBurstinessHeaders
 )
 
+add_executable(test_map_generation
+    src/LargeBagOfWords.h
+    src/Relocalization.h
+    src/MapGenerator.h
+    src/Datasets.h
+    
+    src/LargeBagOfWords.cpp
+    src/Relocalization.cpp
+    src/MapGenerator.cpp
+    src/Datasets.cpp
+    test/test_map_generation.cpp
+)
+target_link_libraries(test_map_generation
+    ${DSO_LIBRARY}
+    ${LIBZIP_LIBRARY}
+    ${OpenCV_LIBS}
+    boost_filesystem
+    ${PCL_COMMON_LIBRARIES}
+    ${PCL_IO_LIBRARIES}
+    GeometricBurstinessHeaders
+)
+add_test(TestMapGeneration test_map_generation /home/daniel/data/tum-for-testing/ /home/daniel/data/tmp/test/)
+
 add_executable(test_approx_kmeans
     src/LargeBagOfWords.h
     
     src/LargeBagOfWords.cpp
     test/test_approx_kmeans.cpp
 )
-
 target_link_libraries(test_approx_kmeans
     ${OpenCV_LIBS}
 )

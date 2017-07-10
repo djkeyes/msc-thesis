@@ -134,7 +134,7 @@ struct DsoOutputRecorder : public Output3DWrapper {
       pointsWithViewpointsById;
   unique_ptr<map<int, unique_ptr<MinimalImageF>>> depthImagesById;
   unique_ptr<map<int, unique_ptr<MinimalImageF>>> rgbImagesById;
-  unique_ptr<map<int, SE3*>> posesById;
+  unique_ptr<map<int, SE3>> posesById;
   unique_ptr<map<int, cv::SparseMat>> sceneCoordinateMaps;
   const map<uint64_t, Eigen::Vector2i, less<uint64_t>,
             Eigen::aligned_allocator<pair<uint64_t, Eigen::Vector2i>>>*
@@ -153,7 +153,7 @@ struct DsoOutputRecorder : public Output3DWrapper {
             new map<int, pair<SE3, unique_ptr<list<ColoredPoint>>>>()),
         depthImagesById(new map<int, unique_ptr<MinimalImageF>>()),
         rgbImagesById(new map<int, unique_ptr<MinimalImageF>>()),
-        posesById(new map<int, SE3*>()),
+        posesById(new map<int, SE3>()),
         sceneCoordinateMaps(new map<int, cv::SparseMat>()),
         latestConnectivity(nullptr),
         frameIdToIncomingId(new map<int, int>()),
@@ -312,8 +312,9 @@ struct DsoOutputRecorder : public Output3DWrapper {
       // uncertainties, but we could experiment with those, too)
       addPoints(fh->pointHessiansMarginalized, HCalib, fh->PRE_camToWorld,
                 fh->shell->incoming_id);
-      // addPoints(fh->pointHessiansOut, HCalib,
-      // fh->PRE_camToWorld, fh->shell->incoming_id);
+      // at thie point, fh->PRE_camToWorld and fh->shell->camToWorld should have
+      // the same value
+      posesById->insert(make_pair(fh->shell->incoming_id, fh->PRE_camToWorld));
 
       // also extract and save the image
       int width = wG[0];
@@ -332,7 +333,7 @@ struct DsoOutputRecorder : public Output3DWrapper {
   }
 
   void publishCamPose(FrameShell* frame, CalibHessian* HCalib) override {
-    posesById->insert(make_pair(frame->incoming_id, &frame->camToWorld));
+    // this pose is not very accurate, just wait the marginalized ones
   }
 
   void pushLiveFrame(FrameHessian* image) override {
@@ -592,7 +593,7 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
     if (scene_coord_iter != sceneCoordinateMaps->end() &&
         pose_iter != poses->end()) {
       cv::SparseMat& scene_coords = scene_coord_iter->second;
-      SE3 world_to_cam = pose_iter->second->inverse();
+      SE3 world_to_cam = pose_iter->second.inverse();
 
       for (Vec3& point : iter->second) {
         // We could perform the same checks as in addPoints, but ostensibly
@@ -789,7 +790,7 @@ void DsoMapGenerator::savePosesInWorldFrame(
     SE3 world_to_camera(orientation, translation);
 
     trajectory_to_world =
-        world_to_camera * poses->at(firstTrackedFrame)->inverse();
+        world_to_camera * poses->at(firstTrackedFrame).inverse();
 
     break;
   }
@@ -803,7 +804,7 @@ void DsoMapGenerator::savePosesInWorldFrame(
   out.open(output_filename, ios::out | ios::trunc);
   for (const auto& element : *poses) {
     int id = element.first;
-    SE3 pose = trajectory_to_world * (*element.second);
+    SE3 pose = trajectory_to_world * element.second;
 
     out << id << " " << pose.translation().x() << " " << pose.translation().y()
         << " " << pose.translation().z() << " " << pose.unit_quaternion().x()
