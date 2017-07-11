@@ -19,7 +19,8 @@ using namespace std;
  */
 
 void test_scene_coordinates_have_valid_projection(
-    const cv::SparseMat& scene_coords, const dso::SE3& pose) {
+    const cv::SparseMat& scene_coords, const dso::SE3& pose, cv::Mat K) {
+  assert(scene_coords.nzcount() > 0);
   for (auto iter = scene_coords.begin(); iter != scene_coords.end(); ++iter) {
     int row = iter.node()->idx[0];
     int col = iter.node()->idx[1];
@@ -40,10 +41,10 @@ void test_scene_coordinates_have_valid_projection(
 
     assert(local_point[2] > 0);
 
-    // TODO: read camera params from somewhere. As it stands, this will only
-    // work on the unmodified TUM MonoVO dataset.
-    double x = local_point[0] * 256.0 / local_point[2] + 319.5;
-    double y = local_point[1] * 254.4 / local_point[2] + 239.5;
+    double x =
+        local_point[0] * K.at<float>(0, 0) / local_point[2] + K.at<float>(0, 2);
+    double y =
+        local_point[1] * K.at<float>(1, 1) / local_point[2] + K.at<float>(1, 2);
 
     double dx = fabs(x - col);
     double dy = fabs(y - row);
@@ -101,37 +102,41 @@ bool test_map_generation(const string& data_dir, const string& cache_dir) {
   vector<sdl::Query> queries;
 
   parser->parseScene(dbs, queries);
-  // just load the first database
-  sdl::Database& db = dbs[0];
+  for (int i = dbs.size() - 1; i >= 0; --i) {
+    auto& db = dbs[i];
 
-  sdl::DsoMapGenerator* map_gen =
-      static_cast<sdl::DsoMapGenerator*>(db.getMapper());
-  map<int, unique_ptr<sdl::Frame>>* frames = db.getFrames();
+    sdl::DsoMapGenerator* map_gen =
+        static_cast<sdl::DsoMapGenerator*>(db.getMapper());
+    map<int, unique_ptr<sdl::Frame>>* frames = db.getFrames();
 
-  // first run the full mapping algorithm
-  map_gen->runVisualOdometry();
+    // first run the full mapping algorithm
+    map_gen->runVisualOdometry();
 
-  map<int, cv::SparseMat> scene_coordinate_maps =
-      map_gen->getSceneCoordinateMaps();
-  map<int, dso::SE3>* poses = map_gen->getPoses();
+    map<int, cv::SparseMat> scene_coordinate_maps =
+        map_gen->getSceneCoordinateMaps();
+    map<int, dso::SE3>* poses = map_gen->getPoses();
 
-  for (unsigned int frame_id = 0; frame_id < frames->size(); ++frame_id) {
-    auto iter = scene_coordinate_maps.find(frame_id);
-    if (iter == scene_coordinate_maps.end() ||
-        poses->find(frame_id) == poses->end()) {
-      continue;
+    for (unsigned int frame_id = 0; frame_id < frames->size(); ++frame_id) {
+      auto iter = scene_coordinate_maps.find(frame_id);
+      if (iter == scene_coordinate_maps.end() ||
+          poses->find(frame_id) == poses->end()) {
+        continue;
+      }
+
+      sdl::Frame* f = frames->at(frame_id).get();
+
+      cv::Mat K = map_gen->getCalibration();
+      test_load_scene_coordinates_from_save(*f, iter->second);
+      test_scene_coordinates_have_valid_projection(iter->second,
+                                                   poses->at(frame_id), K);
     }
 
-    sdl::Frame* f = frames->at(frame_id).get();
+    // Could also check that adjacent frames have points that project into each
+    // others' coordinate frames.
 
-    test_load_scene_coordinates_from_save(*f, iter->second);
-    test_scene_coordinates_have_valid_projection(iter->second,
-                                                 poses->at(frame_id));
+    // pop from the vector, so that old results are erased
+    dbs.pop_back();
   }
-
-  // Could also check that adjacent frames have points that project into each
-  // others' coordinate frames.
-
   return false;
 }
 

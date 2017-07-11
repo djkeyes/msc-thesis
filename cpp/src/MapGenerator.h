@@ -42,6 +42,7 @@ class DsoDatasetReader {
   virtual float* getPhotometricGamma() = 0;
   virtual int getNumImages() = 0;
   virtual ImageAndExposure* getImage(int id) = 0;
+  virtual cv::Mat getK() = 0;
 };
 
 /*
@@ -74,6 +75,7 @@ class DsoMapGenerator : public MapGenerator {
 
   std::map<int, cv::SparseMat> getSceneCoordinateMaps() override;
   std::map<int, dso::SE3>* getPoses() { return poses.get(); }
+  cv::Mat getCalibration() { return datasetReader->getK(); }
 
  private:
   void parseArgument(char* arg, std::string& source, std::string& calib,

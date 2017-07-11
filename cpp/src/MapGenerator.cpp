@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "opencv2/core/eigen.hpp"
 #include "Eigen/Core"
 #include "pcl/io/pcd_io.h"
 #include "pcl/point_types.h"
@@ -58,6 +59,17 @@ class DefaultTumReader : public DsoDatasetReader {
   virtual int getNumImages() { return reader.getNumImages(); }
   virtual ImageAndExposure* getImage(int id) { return reader.getImage(id); }
 
+  virtual cv::Mat getK() {
+    // because getCalibMono is not generalized for Eigen::Map types, we have to
+    // do a fully copy
+    Eigen::Matrix3f K_;
+    int width, height;
+    reader.getCalibMono(K_, width, height);
+    cv::Mat K(3, 3, CV_32F);
+    cv::eigen2cv(K_, K);
+    return K;
+  }
+
   ImageFolderReader reader;
 };
 
@@ -71,7 +83,7 @@ class SimpleReader : public DsoDatasetReader {
  public:
   SimpleReader(const vector<string>& image_paths, cv::Mat K, int width,
                int height, string tmp_dir)
-      : imagePaths(image_paths), dummyPhotometricGamma(255) {
+      : K_(K), imagePaths(image_paths), dummyPhotometricGamma(255) {
     for (unsigned int i = 0; i < dummyPhotometricGamma.size(); i++) {
       dummyPhotometricGamma[i] = i;
     }
@@ -80,8 +92,7 @@ class SimpleReader : public DsoDatasetReader {
     createUndistorterFromTmpFile(K, width, height, tmp_dir + "/calib.txt");
 
     // need to perform global initialization
-    cv::Mat K_;
-    K.convertTo(K_, CV_32F);
+    K_.convertTo(K_, CV_32F);
     Eigen::Map<Eigen::Matrix3f> K_as_eigen(reinterpret_cast<float*>(K_.data));
     setGlobalCalib(width, height, K_as_eigen);
   }
@@ -95,6 +106,9 @@ class SimpleReader : public DsoDatasetReader {
     ImageAndExposure* ret2 =
         pinholeUndistorter->undistort<unsigned char>(min_img.get(), 1.0f, 0.0);
     return ret2;
+  }
+  virtual cv::Mat getK() {
+    return K_;
   }
 
  private:
@@ -123,6 +137,7 @@ class SimpleReader : public DsoDatasetReader {
     // completely re-implementing Undistort :(
     pinholeUndistorter->loadPhotometricCalibration("", "", "");
   }
+  cv::Mat K_;
   const vector<string> imagePaths;
   vector<float> dummyPhotometricGamma;
   unique_ptr<Undistort> pinholeUndistorter;
