@@ -497,11 +497,8 @@ int main(int argc, char** argv) {
   cout << "Have " << pruned_query_count << " valid queries after removing "
        << (orig_query_count - pruned_query_count) << " empty queries." << endl;
 
-  // TODO: use an actually calibrated camera model
-  // supposedly COLMAP can estimate calibration from video as part of its
-  // optimization?
-  Mat K =
-      get<0>(sdl::getDummyCalibration(queries[0].getFrame()->imageLoader()));
+  // assumes all sequences have same calibration
+  Mat K = dbs[0].getCalibration();
   sdl::matching_method->setK(K);
 
   int num_to_return = 8;

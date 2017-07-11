@@ -30,6 +30,7 @@ class MapGenerator {
   virtual void savePointCloudAsPcd(const std::string& filename) = 0;
   virtual void savePointCloudAsManyPcds(const std::string& filepath) = 0;
   virtual void saveDepthMaps(const std::string& filepath) = 0;
+  virtual cv::Mat getCalibration() = 0;
 
   virtual std::map<int, cv::SparseMat> getSceneCoordinateMaps() = 0;
 };
@@ -65,6 +66,7 @@ class DsoMapGenerator : public MapGenerator {
   void savePointCloudAsPcd(const std::string& filename) override;
   void savePointCloudAsManyPcds(const std::string& filepath) override;
   void saveDepthMaps(const std::string& filepath) override;
+  cv::Mat getCalibration() override { return datasetReader->getK(); }
 
   void saveCameraAdjacencyList(const std::string& filename) const;
   void saveRawImages(const std::string& filepath) const;
@@ -75,7 +77,6 @@ class DsoMapGenerator : public MapGenerator {
 
   std::map<int, cv::SparseMat> getSceneCoordinateMaps() override;
   std::map<int, dso::SE3>* getPoses() { return poses.get(); }
-  cv::Mat getCalibration() { return datasetReader->getK(); }
 
  private:
   void parseArgument(char* arg, std::string& source, std::string& calib,

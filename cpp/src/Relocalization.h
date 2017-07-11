@@ -110,8 +110,15 @@ class Database {
 
   void setMapper(MapGenerator* map_gen) {
     mapGen = std::unique_ptr<MapGenerator>(map_gen);
+    // set the calibration before we clear this pointer later
+    // TODO: clean this up
+    K_ = mapGen->getCalibration();
   }
   MapGenerator* getMapper() { return mapGen.get(); }
+
+  cv::Mat getCalibration() {
+    return K_;
+  }
 
   unsigned int db_id;
 
@@ -158,6 +165,8 @@ class Database {
   std::unique_ptr<std::map<int, std::unique_ptr<Frame>>> frames;
 
   std::unique_ptr<InvertedIndexImpl> pInvertedIndexImpl;
+
+  cv::Mat K_;
 };
 }  // namespace sdl
 

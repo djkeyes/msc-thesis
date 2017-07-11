@@ -86,6 +86,9 @@ void SevenScenesParser::parseScene(vector<sdl::Database>& dbs,
 
     sort(sorted_images.begin(), sorted_images.end());
     if (mappingMethod == MappingMethod::DSO) {
+      // TODO: use an actually calibrated camera model
+      // supposedly COLMAP can estimate calibration from video as part of its
+      // optimization?
       auto calib = getDummyCalibration(imread(sorted_images[0]));
       Mat K = get<0>(calib);
       int width = get<1>(calib);
