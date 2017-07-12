@@ -720,7 +720,14 @@ void Database::saveVocabulary(const cv::Mat& vocabulary) const {
   ofs.close();
 }
 void Database::copyVocabularyFileFrom(const Database& from) const {
-  fs::copy_file(from.getVocabularyFilename(), getVocabularyFilename());
+  // TODO: a cache path is basically required for most of this pipeline to
+  // work. Make that a required argument.
+
+  fs::path filename(getVocabularyFilename());
+  // create directory if it doesn't exist
+  fs::create_directories(filename.parent_path());
+
+  fs::copy_file(from.getVocabularyFilename(), filename);
 }
 
 Query::Query(const unsigned int parent_database_id, const Frame* frame)
