@@ -120,12 +120,15 @@ class Database {
     return K_;
   }
 
+  void copyVocabularyFileFrom(const Database& from) const;
+
   unsigned int db_id;
 
  private:
   boost::filesystem::path getVocabularyFilename() const;
   bool loadVocabulary(cv::Mat& vocabularyOut) const;
   void saveVocabulary(const cv::Mat& vocabulary) const;
+
 
   // Utility functions used in train()
   void doMapping();

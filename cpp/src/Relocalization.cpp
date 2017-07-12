@@ -719,6 +719,9 @@ void Database::saveVocabulary(const cv::Mat& vocabulary) const {
 
   ofs.close();
 }
+void Database::copyVocabularyFileFrom(const Database& from) const {
+  fs::copy_file(from.getVocabularyFilename(), getVocabularyFilename());
+}
 
 Query::Query(const unsigned int parent_database_id, const Frame* frame)
     : parent_database_id(parent_database_id),

@@ -39,7 +39,7 @@ int vocabulary_size;
 double epsilon_angle_deg;
 double epsilon_translation;
 MappingMethod mapping_method;
-
+bool reuse_first_vocabulary;
 
 unique_ptr<SceneParser> scene_parser;
 
@@ -345,7 +345,10 @@ void parseArguments(int argc, char** argv) {
           " to relocalize against. Can be 'DSO' or left empty.")
       ("pose_estimation_method", po::value<string>()->default_value(""), "Robust estimation method to determine pose"
           " after image retrieval. Can be '5point_E' to decompose an essential matrix (and use the ground-truth scale),"
-          " 'DLT' to compute a direct linear transform (requires mapping_method to be specified), or left empty.");
+          " 'DLT' to compute a direct linear transform (requires mapping_method to be specified), or left empty.")
+      ("reuse_first_vocabulary", po::value<bool>()->default_value(false), "Compute a visual vocabulary once by clustering "
+          "descriptors in the first database, then re-use it in all subsequent databases. Faster, but potentially much less "
+          "accurate.");
 
   po::options_description commandline_args;
   commandline_args.add(commandline_exclusive).add(general_args);
@@ -395,6 +398,7 @@ void parseArguments(int argc, char** argv) {
   vocabulary_size = vm["vocabulary_size"].as<int>();
   epsilon_angle_deg = vm["epsilon_angle_deg"].as<double>();
   epsilon_translation = vm["epsilon_translation"].as<double>();
+  reuse_first_vocabulary = vm["reuse_first_vocabulary"].as<bool>();
   string mapping_method_str = vm["mapping_method"].as<string>();
   string matching_method_str = vm["pose_estimation_method"].as<string>();
   if (matching_method_str.length() == 0 ||
@@ -468,6 +472,7 @@ int main(int argc, char** argv) {
     detector = sift;
   }
 
+  bool is_first = true;
   for (sdl::Database& db : dbs) {
     db.setVocabularySize(sdl::vocabulary_size);
     db.setupFeatureDetector(sdl::matching_method->needs3dDatabasePoints());
@@ -475,7 +480,11 @@ int main(int argc, char** argv) {
     db.setBowExtractor(makePtr<BOWSparseImgDescriptorExtractor>(
         sift, FlannBasedMatcher::create()));
 
+    if (sdl::reuse_first_vocabulary && !is_first) {
+      db.copyVocabularyFileFrom(dbs[0]);
+    }
     db.train();
+    is_first = false;
   }
   for (sdl::Query& query : queries) {
     // TODO: incorporate previous frames into each query (or maybe just use
