@@ -44,6 +44,7 @@ struct Frame {
   boost::filesystem::path getDescriptorFilename() const;
   bool loadDescriptors(std::vector<cv::KeyPoint>& keypointsOut,
                        cv::Mat& descriptorsOut) const;
+  bool descriptorsExist() const;
   void saveDescriptors(const std::vector<cv::KeyPoint>& keypoints,
                        const cv::Mat& descriptors) const;
 
@@ -121,6 +122,7 @@ class Database {
   }
 
   void copyVocabularyFileFrom(const Database& from) const;
+  bool hasCachedVocabularyFile() const;
 
   unsigned int db_id;
 
@@ -133,6 +135,7 @@ class Database {
   // Utility functions used in train()
   void doMapping();
   bool needToRecomputeSceneCoordinates() const;
+  bool hasCachedDescriptors() const;
   int computeDescriptorsForEachFrame(
       std::map<int, std::vector<cv::KeyPoint>>& image_keypoints,
       std::map<int, cv::Mat>& image_descriptors);

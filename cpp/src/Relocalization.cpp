@@ -85,6 +85,22 @@ bool Frame::loadDescriptors(vector<KeyPoint>& keypointsOut,
 
   return true;
 }
+bool Frame::descriptorsExist() const {
+  if (cachePath.empty()) {
+    return false;
+  }
+
+  fs::path filename(getDescriptorFilename());
+
+  if (!fs::exists(filename)) {
+    return false;
+  }
+
+  ifstream ifs(filename.string(), ios_base::in | ios_base::binary);
+
+  // could also check the size/datatype and compare to filesize
+  return ifs.good();
+}
 void Frame::saveDescriptors(const vector<KeyPoint>& keypoints,
                             const Mat& descriptors) const {
   if (cachePath.empty()) {
@@ -301,11 +317,19 @@ void Database::doMapping() {
 bool Database::needToRecomputeSceneCoordinates() const {
   unsigned int num_saved_coords = 0;
   for (auto file : fs::recursive_directory_iterator(cachePath)) {
-    if (file.path().filename().string().find("scene_coords") == 0) {
+    if (file.path().filename().string().find("scene_coords") != string::npos) {
       num_saved_coords++;
     }
   }
   return num_saved_coords != frames->size();
+}
+bool Database::hasCachedDescriptors() const {
+  for (const auto& element : *frames) {
+    if (!element.second->descriptorsExist()) {
+      return false;
+    }
+  }
+  return true;
 }
 int Database::computeDescriptorsForEachFrame(
     map<int, vector<KeyPoint>>& image_keypoints,
@@ -316,7 +340,6 @@ int Database::computeDescriptorsForEachFrame(
   // iterate through the images
   for (const auto& element : *frames) {
     const auto& frame = element.second;
-    Mat colorImage = frame->imageLoader();
 
     image_keypoints[frame->index] = vector<KeyPoint>();
     image_descriptors.insert(make_pair(frame->index, Mat()));
@@ -325,6 +348,7 @@ int Database::computeDescriptorsForEachFrame(
     // available
     if (!frame->loadDescriptors(image_keypoints[frame->index],
                                 image_descriptors[frame->index])) {
+      Mat colorImage = frame->imageLoader();
       if (associateWithDepthMaps) {
         SceneCoordFeatureDetector* with_depth =
             dynamic_cast<SceneCoordFeatureDetector*>(descriptorExtractor.get());
@@ -554,9 +578,6 @@ void Database::saveInvertedIndex(
 void Database::buildInvertedIndex(
     const map<int, vector<KeyPoint>>& image_keypoints,
     const map<int, Mat>& image_descriptors) {
-  if (loadInvertedIndex(*pInvertedIndexImpl)) {
-    return;
-  }
 
   cout << "Computing bow descriptors for each image in training set using "
           "nearest neighbor to each descriptor..."
@@ -634,11 +655,11 @@ void Database::buildInvertedIndex(
   saveInvertedIndex(*pInvertedIndexImpl);
 }
 void Database::train() {
+  cout << "Training database " << db_id << ", saving to "
+       << getCachePath().string() << endl;
+
   // create cache dir if it doesn't already exist
   fs::create_directories(cachePath);
-
-  map<int, vector<KeyPoint>> image_keypoints;
-  map<int, Mat> image_descriptors;
 
   if (mapGen) {
     cout << "Mapping environment using specified SLAM system..." << endl;
@@ -649,19 +670,35 @@ void Database::train() {
          << endl;
   }
 
-  cout << "computing descriptors for each keyframe..." << endl;
-  int descriptor_count =
-      computeDescriptorsForEachFrame(image_keypoints, image_descriptors);
-  cout << "computed " << descriptor_count << " descriptors in "
-       << frames->size() << " frames." << endl;
+  map<int, vector<KeyPoint>> image_keypoints;
+  map<int, Mat> image_descriptors;
 
+  bool has_index = loadInvertedIndex(*pInvertedIndexImpl);
+
+  // check if we haven't compute the descriptors yet, or if we have but still
+  // need to cluster the vocabulary, or we need to compute word assignments for
+  // the inverted index
+  if (!hasCachedDescriptors() || !hasCachedVocabularyFile() || !has_index) {
+    cout << "computing descriptors for each keyframe..." << endl;
+    int descriptor_count =
+        computeDescriptorsForEachFrame(image_keypoints, image_descriptors);
+    cout << "computed " << descriptor_count << " descriptors in "
+         << frames->size() << " frames." << endl;
+  } else {
+    cout << "Already have cached descriptors." << endl;
+  }
+
+  // even if the vocab is already cached, we need to load it so we can find NNs
+  // for queriesx) {
   cout << "Training vocabulary..." << endl;
   doClustering(image_descriptors);
   cout << "Finished training vocabulary." << endl;
 
-  cout << "Building inverted index..." << endl;
-  buildInvertedIndex(image_keypoints, image_descriptors);
-  cout << "Finished inverted index." << endl;
+  if (!has_index) {
+    cout << "Building inverted index..." << endl;
+    buildInvertedIndex(image_keypoints, image_descriptors);
+    cout << "Finished inverted index." << endl;
+  }
 }
 
 void Database::addFrame(unique_ptr<Frame> frame) {
@@ -730,6 +767,9 @@ void Database::copyVocabularyFileFrom(const Database& from) const {
   fs::copy_file(from.getVocabularyFilename(), filename);
 }
 
+bool Database::hasCachedVocabularyFile() const {
+  return fs::exists(getVocabularyFilename());
+}
 Query::Query(const unsigned int parent_database_id, const Frame* frame)
     : parent_database_id(parent_database_id),
       frame(frame),

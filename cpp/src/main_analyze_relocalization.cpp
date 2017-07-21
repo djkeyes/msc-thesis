@@ -472,7 +472,14 @@ int main(int argc, char** argv) {
     detector = sift;
   }
 
-  bool is_first = true;
+  sdl::Database* db_with_vocab(nullptr);
+  for (sdl::Database& db : dbs) {
+    if (db.hasCachedVocabularyFile()) {
+      db_with_vocab = &db;
+      break;
+    }
+  }
+
   for (sdl::Database& db : dbs) {
     db.setVocabularySize(sdl::vocabulary_size);
     db.setupFeatureDetector(sdl::matching_method->needs3dDatabasePoints());
@@ -480,18 +487,23 @@ int main(int argc, char** argv) {
     db.setBowExtractor(makePtr<BOWSparseImgDescriptorExtractor>(
         sift, FlannBasedMatcher::create()));
 
-    if (sdl::reuse_first_vocabulary && !is_first) {
-      db.copyVocabularyFileFrom(dbs[0]);
+    if (sdl::reuse_first_vocabulary && db_with_vocab != nullptr &&
+        !db.hasCachedVocabularyFile()) {
+      db.copyVocabularyFileFrom(*db_with_vocab);
     }
     db.train();
-    is_first = false;
+    if (db_with_vocab == nullptr) {
+      db_with_vocab = &db;
+    }
   }
   for (sdl::Query& query : queries) {
     // TODO: incorporate previous frames into each query (or maybe just use
     // the cached depth map, which would be fine for cross-database queries)
     query.setupFeatureDetector(sdl::matching_method->needs3dQueryPoints());
     query.setDescriptorExtractor(sift);
-    query.computeDescriptors();
+    if (!query.getFrame()->descriptorsExist()) {
+      query.computeDescriptors();
+    }
   }
 
   // Ideally most queries should be valid. :(
