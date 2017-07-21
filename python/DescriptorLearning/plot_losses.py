@@ -21,7 +21,7 @@ if __name__ == '__main__':
   moving_avg = series.rolling(window=window_size, center=False).mean()
 
   plt.plot(moving_avg.index[window_size - 1:], moving_avg[window_size - 1:])
-  plt.title('Training Loss Over Time, Rolling Median, 32D, ADAM')
+  plt.title('Training Loss Over Time, Rolling Mean, 32D, ADAM')
   plt.ylim((0, 0.12))
   plt.show()
 
