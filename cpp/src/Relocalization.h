@@ -45,6 +45,7 @@ struct Frame {
   bool loadDescriptors(std::vector<cv::KeyPoint>& keypointsOut,
                        cv::Mat& descriptorsOut) const;
   bool descriptorsExist() const;
+  int countDescriptors() const;
   void saveDescriptors(const std::vector<cv::KeyPoint>& keypoints,
                        const cv::Mat& descriptors) const;
 

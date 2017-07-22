@@ -101,6 +101,28 @@ bool Frame::descriptorsExist() const {
   // could also check the size/datatype and compare to filesize
   return ifs.good();
 }
+int Frame::countDescriptors() const {
+  if (cachePath.empty()) {
+    return 0;
+  }
+
+  fs::path filename(getDescriptorFilename());
+
+  if (!fs::exists(filename)) {
+    return 0;
+  }
+
+  ifstream ifs(filename.string(), ios_base::in | ios_base::binary);
+
+  if (!ifs.good()) {
+    return 0;
+  }
+
+  uint32_t num_descriptors;
+  ifs.read(reinterpret_cast<char*>(&num_descriptors), sizeof(uint32_t));
+  ifs.close();
+  return num_descriptors;
+}
 void Frame::saveDescriptors(const vector<KeyPoint>& keypoints,
                             const Mat& descriptors) const {
   if (cachePath.empty()) {

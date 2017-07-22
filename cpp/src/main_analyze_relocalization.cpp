@@ -31,6 +31,7 @@ using namespace cv;
 namespace sdl {
 
 bool use_second_best_for_debugging = true;
+bool only_first_db_for_debugging = true;
 bool display_top_matching_images = false;
 bool save_first_trajectory = true;
 bool display_stereo_correspondences = false;
@@ -278,8 +279,8 @@ class Match_2d_3d_dlt : public MatchingMethod {
                           const vector<Point2f>& query_pts,
                           const vector<Point2f>& database_pts, Mat& inlier_mask,
                           Mat& R, Mat& t) override {
-    int num_iters = 1000;
-    double confidence = 0.9999999;
+    int num_iters = 100;  // 1000
+    double confidence = 0.99;  // 0.9999999;
     double ransac_threshold = 8.0;
 
     // lookup scene coords from database_pts
@@ -472,6 +473,17 @@ int main(int argc, char** argv) {
     detector = sift;
   }
 
+  if (sdl::only_first_db_for_debugging) {
+    // remove all but the first database.
+    dbs.resize(1);
+    queries.erase(std::remove_if(queries.begin(), queries.end(),
+                                 [&dbs](sdl::Query& q) {
+                                   return q.getParentDatabaseId() !=
+                                          dbs[0].db_id;
+                                 }),
+                  queries.end());
+  }
+
   sdl::Database* db_with_vocab(nullptr);
   for (sdl::Database& db : dbs) {
     if (db.hasCachedVocabularyFile()) {
@@ -506,14 +518,15 @@ int main(int argc, char** argv) {
     }
   }
 
+  int orig_query_count = queries.size();
+  queries.erase(std::remove_if(queries.begin(), queries.end(),
+                               [](sdl::Query& q) {
+                                 return q.getFrame()->countDescriptors() == 0;
+                               }),
+                queries.end());
   // Ideally most queries should be valid. :(
   // If this is nonzero, it's probably due to a lack of keyframe density
   // during visual odometry, and discarding empty frames isn't so bad.
-  int orig_query_count = queries.size();
-  queries.erase(
-      std::remove_if(queries.begin(), queries.end(),
-                     [](sdl::Query& q) { return q.getKeypoints().empty(); }),
-      queries.end());
   int pruned_query_count = queries.size();
   cout << "Have " << pruned_query_count << " valid queries after removing "
        << (orig_query_count - pruned_query_count) << " empty queries." << endl;
@@ -543,8 +556,12 @@ int main(int argc, char** argv) {
       }
 
       vector<sdl::Result> results = dbs[i].lookup(queries[j], num_to_return);
-      sdl::Result& top_result =
-          results[sdl::use_second_best_for_debugging ? 1 : 0];
+      unsigned int top_index = sdl::use_second_best_for_debugging ? 1 : 0;
+      if (results.size() <= top_index) {
+        cout << results.size() << " results returned!" << endl;
+        continue;
+      }
+      sdl::Result& top_result = results[top_index];
 
       // display the result in a pretty window
       if (j < 5 && sdl::display_top_matching_images) {
