@@ -115,6 +115,19 @@ class MatchingMethod {
     Mat query_R_gt, query_t_gt;
     scene_parser->loadGroundTruthPose(*q.getFrame(), query_R_gt, query_t_gt);
 
+
+    // FIXME
+    // For PnP RANSAC, this returns the global pose
+    // (For 4pt stereo, this is only a relative pose)
+    // Since the following calculations are predicated on the local pose, also
+    // estimate the pose of the database frame, and subtract that out
+    Mat R_db, t_db, inlier_mask_db;
+    internalDoMatching(top_result, database_pts, database_pts, inlier_mask,
+                       R_db, t_db);
+    R = R * R_db.t();
+    Mat t_db_inv = -R_db.t() * t_db;
+    t += R * t_db;
+
     // Note: iff x = nan, then x != x is true.
     // Use this to detect nan-filled matrices.
     if ((countNonZero(db_t_gt != db_t_gt) > 0) ||
@@ -125,6 +138,11 @@ class MatchingMethod {
       // end, so nans are reasonable. For other datasets, this should not
       // occur. If we wanted to compare to full trajectories, we could
       // compute our own SFM pipeline, although that biases our result.
+      if (same_database) {
+        train_queries_without_gt++;
+      } else {
+        test_queries_without_gt++;
+      }
       return;
     }
 
@@ -152,12 +170,14 @@ class MatchingMethod {
     Mat estimated_R = db_R_gt * R;
     Mat estimated_t = db_R_gt * t + db_t_gt;
 
+
     double translation_error = norm(query_t_gt, estimated_t);
     // compute angle between rotation matrices
     Mat rotation_diff = (query_R_gt * estimated_R.t());
-    // if v is the unit vector in direction z, we want acos(v dot Rv) =
-    // acos(R_22)
-    float angle_error_rad = acos(rotation_diff.at<double>(2, 2));
+    // To measure difference, compute the angle when represented in axis-angle
+    float angle_error_rad =
+        acos((trace(rotation_diff)[0] - 1.0) /
+             2.0);
     float angle_error_deg = (180. * angle_error_rad / M_PI);
 
     if ((translation_error < epsilon_translation) &&
@@ -183,9 +203,10 @@ class MatchingMethod {
         static_cast<double>(high_inlier_test_queries) / total_test_queries;
     double train_loc_accuracy =
         static_cast<double>(epsilon_accurate_train_queries) /
-        total_train_queries;
+        (total_train_queries - train_queries_without_gt);
     double test_loc_accuracy =
-        static_cast<double>(epsilon_accurate_test_queries) / total_test_queries;
+        static_cast<double>(epsilon_accurate_test_queries) /
+        (total_test_queries - test_queries_without_gt);
 
     cout << endl;
     cout << "Processed " << (total_test_queries + total_train_queries)
@@ -225,6 +246,8 @@ class MatchingMethod {
   unsigned int high_inlier_test_queries = 0;
   unsigned int epsilon_accurate_train_queries = 0;
   unsigned int high_inlier_train_queries = 0;
+  unsigned int test_queries_without_gt = 0;
+  unsigned int train_queries_without_gt = 0;
 
  protected:
   virtual void internalDoMatching(const Result& top_result,
@@ -279,7 +302,7 @@ class Match_2d_3d_dlt : public MatchingMethod {
                           const vector<Point2f>& query_pts,
                           const vector<Point2f>& database_pts, Mat& inlier_mask,
                           Mat& R, Mat& t) override {
-    int num_iters = 100;  // 1000
+    int num_iters = 100;  // 1000;
     double confidence = 0.99;  // 0.9999999;
     double ransac_threshold = 8.0;
 
