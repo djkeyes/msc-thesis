@@ -277,6 +277,16 @@ vector<Result> Database::lookup(Query& query, unsigned int num_to_return) {
        i < min(static_cast<unsigned int>(image_scores.size()), num_to_return);
        ++i) {
     results.emplace_back(*frames->at(image_scores[i].image_id));
+    // discard some of the worse correspondences
+    vector<float> weights;
+    for (const auto& correspondence : image_scores[i].matches) {
+      weights.push_back(correspondence.weight);
+    }
+    std::sort(weights.begin(), weights.end());
+    float cutoff =
+        weights[max(0, min(static_cast<int>(weights.size() - 12),
+                           static_cast<int>(weights.size() * 0.25)))];
+
     for (const auto& correspondence : image_scores[i].matches) {
       int db_feature_id =
           pInvertedIndexImpl->invertedIndex
@@ -284,6 +294,9 @@ vector<Result> Database::lookup(Query& query, unsigned int num_to_return) {
                                   correspondence.db_feature_index)
               .feature_id;
 
+      if (correspondence.weight < cutoff) {
+        continue;
+      }
       results.back().matches.emplace_back(
           correspondence.query_feature_id, db_feature_id,
           image_scores[i].image_id, correspondence.weight);
