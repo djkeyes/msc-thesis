@@ -150,23 +150,16 @@ void TumParser::parseScene(vector<sdl::Database>& dbs,
       cur_db.setCachePath(cache / sequence_dir.filename());
     }
 
+    fs::path image_zip = sequence_dir / "images.zip";
     // assumes all the images have been unzipped to a directory images/
-    fs::path image_dir = sequence_dir / "images";
-    vector<string> sorted_images;
 
     string calib = (sequence_dir / "camera.txt").string();
     string gamma_calib = (sequence_dir / "pcalib.txt").string();
     string vignette = (sequence_dir / "vignette.png").string();
 
     shared_ptr<ImageFolderReader> reader(new ImageFolderReader(
-        image_dir.string(), calib, gamma_calib, vignette));
-    for (auto file : fs::recursive_directory_iterator(image_dir)) {
-      string name(file.path().filename().string());
-      if (name.find(".jpg") == string::npos) {
-        continue;
-      }
-      // these files are in the format XXXXX.jpg
-      int id = stoi(name.substr(0, 5));
+        image_zip.string(), calib, gamma_calib, vignette));
+    for (int id = 0; id < reader->getNumImages(); ++id) {
       unique_ptr<Frame> frame(new sdl::Frame(id, cur_db.db_id));
       frame->setPath(sequence_dir);
       frame->setImageLoader([reader, id]() {
@@ -179,16 +172,13 @@ void TumParser::parseScene(vector<sdl::Database>& dbs,
         return converted;
       });
       if (!cache.empty()) {
-        string image_filename(file.path().string());
         frame->setCachePath(cache / sequence_dir.filename());
-        sorted_images.push_back(image_filename);
       }
 
       queries.emplace_back(cur_db.db_id, frame.get());
       cur_db.addFrame(move(frame));
     }
 
-    sort(sorted_images.begin(), sorted_images.end());
     if (mappingMethod == MappingMethod::DSO) {
       cur_db.setMapper(new DsoMapGenerator(sequence_dir.string()));
     }

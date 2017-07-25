@@ -13,8 +13,8 @@
 #include <utility>
 #include <vector>
 
-#include "opencv2/core/eigen.hpp"
 #include "Eigen/Core"
+#include "opencv2/core/eigen.hpp"
 #include "pcl/io/pcd_io.h"
 #include "pcl/point_types.h"
 
@@ -426,7 +426,7 @@ DsoMapGenerator::DsoMapGenerator(const string& input_path) {
 
   // to handle datasets other than tum monoVO, we'll need to change these
   // paths, and change the mode and photometric calibration weights
-  string source = input_path + "/images/";
+  string source = input_path + "/images.zip";
   string calib = input_path + "/camera.txt";
   string gamma_calib = input_path + "/pcalib.txt";
   string vignette = input_path + "/vignette.png";
