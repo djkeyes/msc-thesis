@@ -86,13 +86,19 @@ void SevenScenesParser::parseScene(vector<sdl::Database>& dbs,
 
     sort(sorted_images.begin(), sorted_images.end());
     if (mappingMethod == MappingMethod::DSO) {
-      // TODO: use an actually calibrated camera model
-      // supposedly COLMAP can estimate calibration from video as part of its
-      // optimization?
-      auto calib = getDummyCalibration(imread(sorted_images[0]));
-      Mat K = get<0>(calib);
-      int width = get<1>(calib);
-      int height = get<2>(calib);
+      // use calib from colmap
+      fs::path calib_file(directory / "colmap-calib.txt");
+      // TODO: rewrite the DSO interface to pass this calibration directly
+      UndistortPinhole undistorter(calib_file.string().c_str(), false);
+      dso::Mat33 K_eigen = undistorter.getK();
+      Mat K(3, 3, CV_64F);
+      eigen2cv(K_eigen, K);
+      K.convertTo(K, CV_32F);
+      int width = undistorter.getSize()[0];
+      int height = undistorter.getSize()[1];
+      // TODO: allow user to default to dummy configuration with optional
+      // argument
+
       cur_db.setMapper(new DsoMapGenerator(K, width, height, sorted_images,
                                            cur_db.getCachePath().string()));
     }
@@ -105,8 +111,6 @@ void SevenScenesParser::loadGroundTruthPose(const sdl::Frame& frame,
   stringstream ss;
   ss << "frame-" << setfill('0') << setw(6) << frame.index << ".pose.txt";
   fs::path pose_path = frame.framePath / ss.str();
-  // operator+= is defined, but not operator+. Weird, eh?
-  pose_path += ".pose.txt";
 
   ifstream ifs(pose_path.string());
   rotation.create(3, 3, CV_32FC1);
