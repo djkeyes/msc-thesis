@@ -37,9 +37,7 @@ sdl::SceneParser* parseArguments(int argc, char** argv) {
       ("datadir", po::value<string>()->default_value(""), "Directory of the scene dataset. For datasets composed"
           " of several scenes, this should be the appropriate subdirectory.")
       ("cache", po::value<string>()->default_value(""), "Directory to cache intermediate results, ie"
-          " descriptors or visual vocabulary, between runs.")
-      ("mapping_method", po::value<string>()->default_value(""), "Mapping/SLAM method for building a map"
-          " to relocalize against. Can be 'DSO' or left empty.");
+          " descriptors or visual vocabulary, between runs.");
 
   po::options_description commandline_args;
   commandline_args.add(commandline_exclusive).add(general_args);
@@ -87,27 +85,20 @@ sdl::SceneParser* parseArguments(int argc, char** argv) {
   }
 
   string mapping_method_str = vm["mapping_method"].as<string>();
-  sdl::MappingMethod mapping_method;
-  if (mapping_method_str.find("DSO") == 0) {
-    mapping_method = sdl::MappingMethod::DSO;
-  } else {
-    throw runtime_error("Invalid value for mapping_method!");
-  }
 
   if (vm.count("scene")) {
     string scene_type(vm["scene"].as<string>());
     // currently only one supported scene
     if (scene_type.find("7scenes") == 0) {
       fs::path directory(vm["datadir"].as<string>());
-      sdl::SevenScenesParser* parser =
-          new sdl::SevenScenesParser(directory, mapping_method);
+      sdl::SevenScenesParser* parser = new sdl::SevenScenesParser(directory);
       if (!cache_dir.empty()) {
         parser->setCache(cache_dir);
       }
       return parser;
     } else if (scene_type.find("tum") == 0) {
       fs::path directory(vm["datadir"].as<string>());
-      sdl::TumParser* parser = new sdl::TumParser(directory, mapping_method);
+      sdl::TumParser* parser = new sdl::TumParser(directory);
       if (!cache_dir.empty()) {
         parser->setCache(cache_dir);
       }

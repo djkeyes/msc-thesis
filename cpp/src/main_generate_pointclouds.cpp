@@ -5,7 +5,6 @@
 
 #include "MapGenerator.h"
 
-using sdl::MapGenerator;
 using sdl::DsoMapGenerator;
 
 using std::shared_ptr;
@@ -36,9 +35,9 @@ int main(int argc, char** argv) {
   }
   string filename(argv[3]);
 
-  shared_ptr<MapGenerator> map_gen;
+  shared_ptr<DsoMapGenerator> map_gen;
   if (strcmp(argv[1], "dso") == 0) {
-    map_gen = shared_ptr<MapGenerator>(new DsoMapGenerator(
+    map_gen = shared_ptr<DsoMapGenerator>(new DsoMapGenerator(
         argc - num_required_args, argv + num_required_args));
   } else {
     usage();

@@ -216,6 +216,52 @@ cv::SparseMat Frame::loadSceneCoordinates() const {
 
   return coordinate_map;
 }
+fs::path Frame::getPoseFilename() const {
+  stringstream ss;
+  ss << "pose_from_vo_" << setfill('0') << setw(6) << index << ".bin";
+  return cachePath / ss.str();
+}
+void Frame::savePose(const dso::SE3& pose) const {
+  fs::path filename(getPoseFilename().string());
+  fs::create_directories(filename.parent_path());
+
+  ofstream ofs(filename.string(), ios_base::out | ios_base::binary);
+
+  double x = pose.translation().x();
+  double y = pose.translation().y();
+  double z = pose.translation().z();
+  double qx = pose.unit_quaternion().x();
+  double qy = pose.unit_quaternion().y();
+  double qz = pose.unit_quaternion().z();
+  double qw = pose.unit_quaternion().w();
+
+  ofs.write(reinterpret_cast<const char*>(&x), sizeof(double));
+  ofs.write(reinterpret_cast<const char*>(&y), sizeof(double));
+  ofs.write(reinterpret_cast<const char*>(&z), sizeof(double));
+  ofs.write(reinterpret_cast<const char*>(&qx), sizeof(double));
+  ofs.write(reinterpret_cast<const char*>(&qy), sizeof(double));
+  ofs.write(reinterpret_cast<const char*>(&qz), sizeof(double));
+  ofs.write(reinterpret_cast<const char*>(&qw), sizeof(double));
+  ofs.close();
+}
+dso::SE3 Frame::loadPose() const {
+  ifstream ifs(getPoseFilename().string(),
+               ios_base::in | ios_base::binary);
+
+  double x, y, z, qx, qy, qz, qw;
+  ifs.read(reinterpret_cast<char*>(&x), sizeof(double));
+  ifs.read(reinterpret_cast<char*>(&y), sizeof(double));
+  ifs.read(reinterpret_cast<char*>(&z), sizeof(double));
+  ifs.read(reinterpret_cast<char*>(&qx), sizeof(double));
+  ifs.read(reinterpret_cast<char*>(&qy), sizeof(double));
+  ifs.read(reinterpret_cast<char*>(&qz), sizeof(double));
+  ifs.read(reinterpret_cast<char*>(&qw), sizeof(double));
+  ifs.close();
+
+  Eigen::Quaterniond q(qw, qx, qy, qz);
+  dso::SE3::Point t(x, y, z);
+  return dso::SE3(q, t);
+}
 struct Database::InvertedIndexImpl {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   geometric_burstiness::InvertedIndex<64> invertedIndex;
@@ -329,6 +375,7 @@ void Database::doMapping() {
   // then fetch the depth maps / poses, and convert them to 2D -> 3D image maps
   map<int, cv::SparseMat> scene_coordinate_maps =
       mapGen->getSceneCoordinateMaps();
+  std::map<int, dso::SE3>* poses = mapGen->getPoses();
 
   const int* dims = scene_coordinate_maps.begin()->second.size();
   for (unsigned int frame_id = 0; frame_id < frames->size(); ++frame_id) {
@@ -339,6 +386,16 @@ void Database::doMapping() {
       frames->at(frame_id)->saveSceneCoordinates(empty);
     } else {
       frames->at(frame_id)->saveSceneCoordinates(iter->second);
+    }
+
+    auto pose_iter = poses->find(frame_id);
+    if (pose_iter == poses->end()) {
+      double nan = numeric_limits<double>::quiet_NaN();
+      dso::SE3 invalid(dso::SE3(Eigen::Quaterniond::Identity(),
+                                dso::SE3::Point(nan, nan, nan)));
+      frames->at(frame_id)->savePose(invalid);
+    } else {
+      frames->at(frame_id)->savePose(pose_iter->second);
     }
   }
 

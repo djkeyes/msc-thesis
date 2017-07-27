@@ -52,6 +52,9 @@ struct Frame {
   boost::filesystem::path getSceneCoordinateFilename() const;
   void saveSceneCoordinates(cv::SparseMat coordinate_map) const;
   cv::SparseMat loadSceneCoordinates() const;
+  boost::filesystem::path getPoseFilename() const;
+  void savePose(const dso::SE3& pose) const;
+  dso::SE3 loadPose() const;
 };
 
 struct Result {
@@ -98,7 +101,7 @@ class Database {
   std::vector<Result> lookup(Query& query, unsigned int num_to_return);
 
   void setVocabularySize(int size) { vocabulary_size = size; }
-  void setMapper(std::unique_ptr<MapGenerator> map_gen);
+  void setMapper(std::unique_ptr<DsoMapGenerator> map_gen);
   void setupFeatureDetector(bool detect_from_depth_maps);
   void setDescriptorExtractor(
       cv::Ptr<cv::DescriptorExtractor> descriptor_extractor);
@@ -110,13 +113,13 @@ class Database {
 
   const boost::filesystem::path& getCachePath() { return cachePath; }
 
-  void setMapper(MapGenerator* map_gen) {
-    mapGen = std::unique_ptr<MapGenerator>(map_gen);
+  void setMapper(DsoMapGenerator* map_gen) {
+    mapGen = std::unique_ptr<DsoMapGenerator>(map_gen);
     // set the calibration before we clear this pointer later
     // TODO: clean this up
     K_ = mapGen->getCalibration();
   }
-  MapGenerator* getMapper() { return mapGen.get(); }
+  DsoMapGenerator* getMapper() { return mapGen.get(); }
 
   cv::Mat getCalibration() {
     return K_;
@@ -161,7 +164,7 @@ class Database {
 
   int vocabulary_size = 100000;
 
-  std::unique_ptr<MapGenerator> mapGen;
+  std::unique_ptr<DsoMapGenerator> mapGen;
 
   cv::Ptr<cv::DescriptorExtractor> descriptorExtractor;
   bool associateWithDepthMaps;

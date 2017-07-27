@@ -53,6 +53,8 @@ void SevenScenesParser::parseScene(vector<sdl::Database>& dbs,
     throw std::runtime_error("scene contained no sequences!");
   }
 
+  sort(sequences.begin(), sequences.end());
+
   // each sequence can produce 1 database and several queries
   for (const fs::path& sequence_dir : sequences) {
     dbs.emplace_back();
@@ -71,7 +73,10 @@ void SevenScenesParser::parseScene(vector<sdl::Database>& dbs,
       }
       // these files are in the format frame-XXXXXX.color.png
       int id = stoi(name.substr(6, 6));
-      unique_ptr<Frame> frame(new sdl::Frame(id, cur_db.db_id));
+//      if (id < 50) {
+//        continue;
+//      }
+      unique_ptr<Frame> frame(new sdl::Frame(id/* - 50*/, cur_db.db_id));
       frame->setImageLoader([file]() { return imread(file.path().string()); });
       frame->setPath(sequence_dir);
       if (!cache.empty()) {
@@ -85,23 +90,21 @@ void SevenScenesParser::parseScene(vector<sdl::Database>& dbs,
     }
 
     sort(sorted_images.begin(), sorted_images.end());
-    if (mappingMethod == MappingMethod::DSO) {
-      // use calib from colmap
-      fs::path calib_file(directory / "colmap-calib.txt");
-      // TODO: rewrite the DSO interface to pass this calibration directly
-      UndistortPinhole undistorter(calib_file.string().c_str(), false);
-      dso::Mat33 K_eigen = undistorter.getK();
-      Mat K(3, 3, CV_64F);
-      eigen2cv(K_eigen, K);
-      K.convertTo(K, CV_32F);
-      int width = undistorter.getSize()[0];
-      int height = undistorter.getSize()[1];
-      // TODO: allow user to default to dummy configuration with optional
-      // argument
+    // use calib from colmap
+    fs::path calib_file(directory / "colmap-calib.txt");
+    // TODO: rewrite the DSO interface to pass this calibration directly
+    UndistortPinhole undistorter(calib_file.string().c_str(), false);
+    dso::Mat33 K_eigen = undistorter.getK();
+    Mat K(3, 3, CV_64F);
+    eigen2cv(K_eigen, K);
+    K.convertTo(K, CV_32F);
+    int width = undistorter.getSize()[0];
+    int height = undistorter.getSize()[1];
+    // TODO: allow user to default to dummy configuration with optional
+    // argument
 
-      cur_db.setMapper(new DsoMapGenerator(K, width, height, sorted_images,
-                                           cur_db.getCachePath().string()));
-    }
+    cur_db.setMapper(new DsoMapGenerator(K, width, height, sorted_images,
+                                         cur_db.getCachePath().string()));
   }
 }
 
@@ -144,6 +147,8 @@ void TumParser::parseScene(vector<sdl::Database>& dbs,
     throw std::runtime_error("scene contained no sequences!");
   }
 
+  sort(sequences.begin(), sequences.end());
+
   // each sequence can produce 1 database and several queries
   for (const fs::path& sequence_dir : sequences) {
     dbs.emplace_back();
@@ -183,9 +188,7 @@ void TumParser::parseScene(vector<sdl::Database>& dbs,
       cur_db.addFrame(move(frame));
     }
 
-    if (mappingMethod == MappingMethod::DSO) {
-      cur_db.setMapper(new DsoMapGenerator(sequence_dir.string()));
-    }
+    cur_db.setMapper(new DsoMapGenerator(sequence_dir.string()));
     // preload the ground truth poses, so we don't have to seek every time
     // file is sequence_dir/groundtruthSync.txt
     fs::path pose_path = sequence_dir / "groundtruthSync.txt";

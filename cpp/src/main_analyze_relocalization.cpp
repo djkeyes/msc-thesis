@@ -11,9 +11,11 @@
 #include <utility>
 #include <vector>
 
+#include "Eigen/Core"
 #include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
 #include "opencv2/calib3d/calib3d.hpp"
+#include "opencv2/core/eigen.hpp"
 #include "opencv2/core/operations.hpp"
 #include "opencv2/highgui.hpp"
 #include "opencv2/imgproc.hpp"
@@ -30,8 +32,8 @@ using namespace cv;
 
 namespace sdl {
 
-bool use_second_best_for_debugging = true;
-bool only_first_db_for_debugging = true;
+bool use_second_best_for_debugging = false;
+bool only_first_db_for_debugging = false;
 bool display_top_matching_images = false;
 bool save_first_trajectory = true;
 bool display_stereo_correspondences = false;
@@ -39,7 +41,6 @@ bool display_stereo_correspondences = false;
 int vocabulary_size;
 double epsilon_angle_deg;
 double epsilon_translation;
-MappingMethod mapping_method;
 bool reuse_first_vocabulary;
 
 unique_ptr<SceneParser> scene_parser;
@@ -115,6 +116,39 @@ class MatchingMethod {
     Mat query_R_gt, query_t_gt;
     scene_parser->loadGroundTruthPose(*q.getFrame(), query_R_gt, query_t_gt);
 
+    int train_id = top_result.frame.dbId;
+    auto& db_gt_traj = groundTruthTrajectories[train_id];
+    auto& db_vo_traj = voTrajectories[train_id];
+    if (db_gt_traj.find(top_result.frame.index) == db_gt_traj.end()) {
+      db_gt_traj[top_result.frame.index] =
+          make_pair(db_R_gt.clone(), db_t_gt.clone());
+
+      dso::SE3 pose(top_result.frame.loadPose());
+      Mat db_R_vo(3, 3, CV_64F), db_t_vo(3, 1, CV_64F);
+      eigen2cv(pose.rotationMatrix(), db_R_vo);
+      eigen2cv(pose.translation(), db_t_vo);
+
+      db_vo_traj[top_result.frame.index] = make_pair(db_R_vo, db_t_vo);
+    }
+
+    int test_id = q.getParentDatabaseId();
+    auto& query_gt_traj = groundTruthTrajectories[test_id];
+    auto& query_vo_traj = voTrajectories[test_id];
+    if (query_gt_traj.find(q.getFrame()->index) == query_gt_traj.end()) {
+      query_gt_traj[q.getFrame()->index] =
+          make_pair(query_R_gt.clone(), query_t_gt.clone());
+
+      dso::SE3 pose(q.getFrame()->loadPose());
+      Mat query_R_vo(3, 3, CV_64F), query_t_vo(3, 1, CV_64F);
+      eigen2cv(pose.rotationMatrix(), query_R_vo);
+      eigen2cv(pose.translation(), query_t_vo);
+
+      query_vo_traj[q.getFrame()->index] = make_pair(query_R_vo, query_t_vo);
+    }
+
+    auto& db_to_q_traj = dbToQueryTrajectories[train_id][test_id];
+    db_to_q_traj[q.getFrame()->index] =
+        make_tuple(R.clone(), t.clone(), top_result.frame.index);
 
     // FIXME
     // For PnP RANSAC, this returns the global pose
@@ -169,7 +203,6 @@ class MatchingMethod {
 
     Mat estimated_R = db_R_gt * R;
     Mat estimated_t = db_R_gt * t + db_t_gt;
-
 
     double translation_error = norm(query_t_gt, estimated_t);
     // compute angle between rotation matrices
@@ -241,6 +274,123 @@ class MatchingMethod {
       expected_file.close();
     }
   }
+  void saveActualAndEstimatedTrajectories(const fs::path& path) {
+    fs::path results_dir = path / "results";
+    fs::create_directories(results_dir);
+
+    for (auto& element : groundTruthTrajectories) {
+      int dbid = element.first;
+      auto& trajectory = element.second;
+
+      stringstream ss;
+      ss << "gt_" << setfill('0') << setw(2) << dbid << ".txt";
+      ofstream ofs((results_dir / ss.str()).string());
+      for (auto& frame : trajectory) {
+        int frame_id = frame.first;
+        Mat R = frame.second.first;
+        Mat t = frame.second.second;
+        if (R.type() != CV_32F) {
+          R.convertTo(R, CV_32F);
+        }
+        if (t.type() != CV_32F) {
+          t.convertTo(t, CV_32F);
+        }
+
+        // format on each line:
+        // frameid t0 t1 t2 R00 R01 R02 R10 R11 R12 R20 R21 R22
+        ofs << frame_id;
+
+        for (int i = 0; i < 3; ++i) {
+          ofs << " " << t.at<float>(i);
+        }
+        for (int i = 0; i < 3; ++i) {
+          for (int j = 0; j < 3; ++j) {
+            ofs << " " << R.at<float>(i, j);
+          }
+        }
+        ofs << endl;
+      }
+      ofs.close();
+    }
+
+    for (auto& element : voTrajectories) {
+      int dbid = element.first;
+      auto& trajectory = element.second;
+
+      stringstream ss;
+      ss << "vo_" << setfill('0') << setw(2) << dbid << ".txt";
+      ofstream ofs((results_dir / ss.str()).string());
+      for (auto& frame : trajectory) {
+        int frame_id = frame.first;
+        Mat R = frame.second.first;
+        Mat t = frame.second.second;
+        if (R.type() != CV_32F) {
+          R.convertTo(R, CV_32F);
+        }
+        if (t.type() != CV_32F) {
+          t.convertTo(t, CV_32F);
+        }
+
+        // format on each line:
+        // frameid t0 t1 t2 R00 R01 R02 R10 R11 R12 R20 R21 R22
+        ofs << frame_id;
+
+        for (int i = 0; i < 3; ++i) {
+          ofs << " " << t.at<float>(i);
+        }
+        for (int i = 0; i < 3; ++i) {
+          for (int j = 0; j < 3; ++j) {
+            ofs << " " << R.at<float>(i, j);
+          }
+        }
+        ofs << endl;
+      }
+      ofs.close();
+    }
+
+    for (auto& query_trajectories : dbToQueryTrajectories) {
+      int train_dbid = query_trajectories.first;
+      for (auto& element : query_trajectories.second) {
+        int test_dbid = element.first;
+        auto& trajectory = element.second;
+        stringstream ss;
+        ss << "reloc_" << setfill('0') << setw(2) << test_dbid << "_refframe_"
+           << setfill('0') << setw(2) << train_dbid << ".txt";
+        ofstream ofs((results_dir / ss.str()).string());
+        for (auto& frame : trajectory) {
+          int test_frame_id = frame.first;
+          Mat R = get<0>(frame.second);
+          Mat t = get<1>(frame.second);
+          int train_frame_id = get<2>(frame.second);
+          if (R.type() != CV_32F) {
+            R.convertTo(R, CV_32F);
+          }
+          if (t.type() != CV_32F) {
+            t.convertTo(t, CV_32F);
+          }
+
+          // format
+          // frameid refid t0 t1 t2 R00 R01 R02 R10 R11 R12 R20 R21 R22
+          // note: refid is the frame that was used to estimate the pose of the
+          // current frame, but in general it will not have the same pose. It's
+          // only provided for completeness.
+
+          ofs << test_frame_id << " " << train_frame_id;
+
+          for (int i = 0; i < 3; ++i) {
+            ofs << " " << t.at<float>(i);
+          }
+          for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+              ofs << " " << R.at<float>(i, j);
+            }
+          }
+          ofs << endl;
+        }
+        ofs.close();
+      }
+    }
+  }
 
   unsigned int epsilon_accurate_test_queries = 0;
   unsigned int high_inlier_test_queries = 0;
@@ -259,6 +409,19 @@ class MatchingMethod {
 
  private:
   map<int, pair<Mat, Mat>> actualAndExpectedPoses;
+
+  // dbToQueryTrajectories[d][q][fq] contains a tuple (Mat, Mat, int) of the
+  // relocalized pose (rotation and translation Mats, resp.) and fdb (the
+  // corresponding frame index in the database), for frame fq from query
+  // sequence q in database sequence d's frame of reference
+  map<int, map<int, map<int, tuple<Mat, Mat, int>>>> dbToQueryTrajectories;
+  // groundTruthTrajectories[d][f] contains the ground truth pose (rotation and
+  // translation Mats, resp.) of frame f in database sequence d
+  map<int, map<int, pair<Mat, Mat>>> groundTruthTrajectories;
+  // voTrajectories[d][f] contains the poses (rotation and translation Mats,
+  // resp.) estimated from visual odometry (DSO) truth pose of frame f in
+  // database sequence d
+  map<int, map<int, pair<Mat, Mat>>> voTrajectories;
 };
 
 // Match between images and compute homography
@@ -302,8 +465,8 @@ class Match_2d_3d_dlt : public MatchingMethod {
                           const vector<Point2f>& query_pts,
                           const vector<Point2f>& database_pts, Mat& inlier_mask,
                           Mat& R, Mat& t) override {
-    int num_iters = 100;  // 1000;
-    double confidence = 0.99;  // 0.9999999;
+    int num_iters = 1000;
+    double confidence = 0.9999999;
     double ransac_threshold = 8.0;
 
     // lookup scene coords from database_pts
@@ -365,8 +528,6 @@ void parseArguments(int argc, char** argv) {
       ("epsilon_angle_deg", po::value<double>()->default_value(5), "Angle in degrees for a pose to be considered accurate.")
       ("epsilon_translation", po::value<double>()->default_value(0.05), "Distance in the scene coordinate system for a pose"
           " to be considered accurate.")
-      ("mapping_method", po::value<string>()->default_value(""), "Mapping/SLAM method for building a map"
-          " to relocalize against. Can be 'DSO' or left empty.")
       ("pose_estimation_method", po::value<string>()->default_value(""), "Robust estimation method to determine pose"
           " after image retrieval. Can be '5point_E' to decompose an essential matrix (and use the ground-truth scale),"
           " 'DLT' to compute a direct linear transform (requires mapping_method to be specified), or left empty.")
@@ -423,7 +584,6 @@ void parseArguments(int argc, char** argv) {
   epsilon_angle_deg = vm["epsilon_angle_deg"].as<double>();
   epsilon_translation = vm["epsilon_translation"].as<double>();
   reuse_first_vocabulary = vm["reuse_first_vocabulary"].as<bool>();
-  string mapping_method_str = vm["mapping_method"].as<string>();
   string matching_method_str = vm["pose_estimation_method"].as<string>();
   if (matching_method_str.length() == 0 ||
       matching_method_str.find("5point_E") == 0) {
@@ -434,33 +594,20 @@ void parseArguments(int argc, char** argv) {
     throw runtime_error("Invalid value for pose_estimation_method!");
   }
 
-  if (mapping_method_str.length() == 0 &&
-      matching_method_str.find("DLT") == 0) {
-    throw runtime_error(
-        "A 3D matching method was specified, but no SLAM method was "
-        "specified.");
-  } else if (mapping_method_str.find("DSO") == 0) {
-    mapping_method = MappingMethod::DSO;
-  } else if (mapping_method_str.length() == 0) {
-    mapping_method = MappingMethod::NONE;
-  } else {
-    throw runtime_error("Invalid value for mapping_method!");
-  }
-
   if (vm.count("scene")) {
     string scene_type(vm["scene"].as<string>());
     // currently only one supported scene
     if (scene_type.find("7scenes") == 0) {
       fs::path directory(vm["datadir"].as<string>());
       SevenScenesParser* parser =
-          new SevenScenesParser(directory, mapping_method);
+          new SevenScenesParser(directory);
       if (!cache_dir.empty()) {
         parser->setCache(cache_dir);
       }
       scene_parser = unique_ptr<SceneParser>(parser);
     } else if (scene_type.find("tum") == 0) {
       fs::path directory(vm["datadir"].as<string>());
-      TumParser* parser = new TumParser(directory, mapping_method);
+      TumParser* parser = new TumParser(directory);
       if (!cache_dir.empty()) {
         parser->setCache(cache_dir);
       }
@@ -694,6 +841,8 @@ int main(int argc, char** argv) {
   }
 
   sdl::matching_method->printResults(total_train_queries, total_test_queries);
+  sdl::matching_method->saveActualAndEstimatedTrajectories(
+      sdl::scene_parser->getCache());
 
   return 0;
 }

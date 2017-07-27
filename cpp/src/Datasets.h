@@ -29,12 +29,8 @@ inline std::tuple<cv::Mat, int, int> getDummyCalibration(cv::Mat probe_image) {
   return std::make_tuple(K, img_width, img_height);
 }
 
-enum MappingMethod { DSO, NONE };
-
 class SceneParser {
  public:
-  explicit SceneParser(MappingMethod mapping_method)
-      : mappingMethod(mapping_method) {}
   virtual ~SceneParser() {}
 
   /*
@@ -51,32 +47,31 @@ class SceneParser {
   virtual void loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
                                    cv::Mat& translation) = 0;
 
+  void setCache(boost::filesystem::path cache_dir) { cache = cache_dir; }
+  const boost::filesystem::path& getCache() { return cache; }
+
  protected:
-  MappingMethod mappingMethod;
+  boost::filesystem::path cache;
 };
 
 class SevenScenesParser : public SceneParser {
  public:
-  explicit SevenScenesParser(const boost::filesystem::path& directory,
-                             MappingMethod mapping_method)
-      : SceneParser(mapping_method), directory(directory) {}
+  explicit SevenScenesParser(const boost::filesystem::path& directory)
+      : directory(directory) {}
   virtual ~SevenScenesParser() {}
   virtual void parseScene(std::vector<sdl::Database>& dbs,
                           std::vector<sdl::Query>& queries);
   virtual void loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
                                    cv::Mat& translation);
-  void setCache(boost::filesystem::path cache_dir) { cache = cache_dir; }
 
  private:
   boost::filesystem::path directory;
-  boost::filesystem::path cache;
 };
 
 class TumParser : public SceneParser {
  public:
-  explicit TumParser(const boost::filesystem::path& directory,
-                     MappingMethod mapping_method)
-      : SceneParser(mapping_method), directory(directory) {}
+  explicit TumParser(const boost::filesystem::path& directory)
+      : directory(directory) {}
   virtual ~TumParser() {}
   virtual void parseScene(std::vector<sdl::Database>& dbs,
                           std::vector<sdl::Query>& queries);
@@ -84,11 +79,8 @@ class TumParser : public SceneParser {
   virtual void loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
                                    cv::Mat& translation);
 
-  void setCache(boost::filesystem::path cache_dir) { cache = cache_dir; }
-
  private:
   boost::filesystem::path directory;
-  boost::filesystem::path cache;
   std::map<int, std::map<int, std::tuple<cv::Mat, cv::Mat>>>
       rotationsAndTranslationsByDatabaseAndFrame;
 };

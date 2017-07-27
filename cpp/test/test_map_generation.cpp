@@ -95,7 +95,7 @@ void test_load_scene_coordinates_from_save(const sdl::Frame& f,
 
 bool test_map_generation(const string& data_dir, const string& cache_dir) {
   unique_ptr<sdl::TumParser> parser(
-      new sdl::TumParser(data_dir, sdl::MappingMethod::DSO));
+      new sdl::TumParser(data_dir));
   parser->setCache(cache_dir);
 
   vector<sdl::Database> dbs;
