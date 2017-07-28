@@ -76,14 +76,12 @@ void SevenScenesParser::parseScene(vector<sdl::Database>& dbs,
 //      if (id < 50) {
 //        continue;
 //      }
-      unique_ptr<Frame> frame(new sdl::Frame(id/* - 50*/, cur_db.db_id));
+      unique_ptr<Frame> frame(new sdl::Frame(id, cur_db.db_id));
       frame->setImageLoader([file]() { return imread(file.path().string()); });
       frame->setPath(sequence_dir);
-      if (!cache.empty()) {
-        string image_filename(file.path().string());
-        frame->setCachePath(cache / sequence_dir.filename());
-        sorted_images.push_back(image_filename);
-      }
+      string image_filename(file.path().string());
+      frame->setCachePath(cache / sequence_dir.filename());
+      sorted_images.push_back(image_filename);
 
       queries.emplace_back(cur_db.db_id, frame.get());
       cur_db.addFrame(move(frame));
@@ -155,9 +153,7 @@ void TumParser::parseScene(vector<sdl::Database>& dbs,
 
     Database& cur_db = dbs.back();
     cur_db.db_id = dbs.size() - 1;
-    if (!cache.empty()) {
-      cur_db.setCachePath(cache / sequence_dir.filename());
-    }
+    cur_db.setCachePath(cache / sequence_dir.filename());
 
     fs::path image_zip = sequence_dir / "images.zip";
     // assumes all the images have been unzipped to a directory images/
@@ -180,9 +176,7 @@ void TumParser::parseScene(vector<sdl::Database>& dbs,
         delete image;
         return converted;
       });
-      if (!cache.empty()) {
-        frame->setCachePath(cache / sequence_dir.filename());
-      }
+      frame->setCachePath(cache / sequence_dir.filename());
 
       queries.emplace_back(cur_db.db_id, frame.get());
       cur_db.addFrame(move(frame));
