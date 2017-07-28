@@ -378,14 +378,17 @@ void Database::doMapping() {
   std::map<int, dso::SE3>* poses = mapGen->getPoses();
 
   const int* dims = scene_coordinate_maps.begin()->second.size();
-  for (unsigned int frame_id = 0; frame_id < frames->size(); ++frame_id) {
+  for (auto& element : *frames) {
+    Frame& cur_frame = *element.second;
+    int frame_id = element.first;
+
     auto iter = scene_coordinate_maps.find(frame_id);
     if (iter == scene_coordinate_maps.end()) {
       cv::SparseMat empty;
       empty.create(2, dims, CV_32FC3);
-      frames->at(frame_id)->saveSceneCoordinates(empty);
+      cur_frame.saveSceneCoordinates(empty);
     } else {
-      frames->at(frame_id)->saveSceneCoordinates(iter->second);
+      cur_frame.saveSceneCoordinates(iter->second);
     }
 
     auto pose_iter = poses->find(frame_id);
@@ -393,9 +396,9 @@ void Database::doMapping() {
       double nan = numeric_limits<double>::quiet_NaN();
       dso::SE3 invalid(dso::SE3(Eigen::Quaterniond::Identity(),
                                 dso::SE3::Point(nan, nan, nan)));
-      frames->at(frame_id)->savePose(invalid);
+      cur_frame.savePose(invalid);
     } else {
-      frames->at(frame_id)->savePose(pose_iter->second);
+      cur_frame.savePose(pose_iter->second);
     }
   }
 
@@ -548,9 +551,10 @@ MatrixXf Database::computeHammingThresholds(
   vector<int> num_desc_per_word(vocabulary_size, 0);
   int num_missing_words = vocabulary_size;
 
-  vector<int> randomly_permuted_db_ids(num_images);
-  for (int i = 0; i < num_images; ++i) {
-    randomly_permuted_db_ids[i] = i;
+  vector<int> randomly_permuted_db_ids;
+  randomly_permuted_db_ids.reserve(num_images);
+  for (auto& element : image_descriptors) {
+    randomly_permuted_db_ids.push_back(element.first);
   }
   random_shuffle(randomly_permuted_db_ids.begin(),
                  randomly_permuted_db_ids.end());
