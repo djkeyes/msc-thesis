@@ -451,9 +451,9 @@ DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, int width, int height,
   // frames are skipped for a variety of reasons. The most common is probably no
   // camera movement / ill-conditioned depth estimation.
   setting_kfGlobalWeight = 2;
-  setting_minFrames = 5;
-  setting_maxFrames = 7;
-  setting_maxOptIterations = 6;
+  setting_minFrames = 10;
+  setting_maxFrames = 50;
+  setting_maxOptIterations = 10;
   setting_minOptIterations = 1;
   setting_realTimeMaxKF = true;
 
