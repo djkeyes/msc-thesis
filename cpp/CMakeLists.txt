@@ -23,6 +23,7 @@ find_package(OpenCV)
 find_library(DSO_LIBRARY dso ${DSO_PATH}/build/lib)
 find_package(PCL REQUIRED COMPONENTS common io features)
 find_package(GeometricBurstiness CONFIG REQUIRED) # this exports GeometricBurstinessHeaders
+find_package(Caffe REQUIRED)
 
 # fix unnecessary link required by libproj in ubuntu 16.04
 list(REMOVE_ITEM PCL_LIBRARIES "vtkproj4")
@@ -106,12 +107,14 @@ add_executable(main_analyze_relocalization
     src/MapGenerator.h
     src/FusedFeatureDescriptors.h
     src/Datasets.h
+    src/CaffeDescriptor.h
     
     src/LargeBagOfWords.cpp
     src/Relocalization.cpp
     src/MapGenerator.cpp
     src/FusedFeatureDescriptors.cpp
     src/Datasets.cpp
+    src/CaffeDescriptor.cpp
     src/main_analyze_relocalization.cpp
 )
 
@@ -124,6 +127,7 @@ target_link_libraries(main_analyze_relocalization
     ${PCL_COMMON_LIBRARIES}
     ${PCL_IO_LIBRARIES}
     GeometricBurstinessHeaders
+    ${Caffe_LIBRARIES}
 )
 
 
@@ -184,4 +188,16 @@ target_link_libraries(test_approx_kmeans
 )
 add_test(TestApproxKmeans test_approx_kmeans)
 
+add_executable(test_caffe_descriptor
+    src/CaffeDescriptor.h
+    
+    src/CaffeDescriptor.cpp
+    test/test_caffe_descriptor.cpp
+)
+target_link_libraries(test_caffe_descriptor
+    ${OpenCV_LIBS}
+    boost_filesystem
+    ${Caffe_LIBRARIES}
+)
+add_test(TestCaffeDescriptor test_caffe_descriptor)
 
