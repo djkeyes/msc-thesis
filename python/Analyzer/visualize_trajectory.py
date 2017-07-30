@@ -87,7 +87,7 @@ def computeSim3Alignment(X, Y):
   U, diag, V = np.linalg.svd(A)
   R = V.T.dot(U.T)
   if (np.linalg.det(R) < 0):
-    V[:, 2] *= -1
+    V[2, :] *= -1
     R = V.T.dot(U.T)
 
   cov = 0
@@ -109,7 +109,7 @@ def applySim3(orig_poses, s, R, t):
 
 
 def main():
-  ground_truth, poses_from_vo, estimated = read_results('/home/daniel/data/tmp/fire/results')
+  ground_truth, poses_from_vo, estimated = read_results('/home/daniel/data/tmp/heads/results')
 
   colors = 'bgrcmy'
 
@@ -121,6 +121,7 @@ def main():
     plot_translations_and_orientation_vecs(poses, ax, color, 'seq-' + str(i))
   plt.title('Ground truth trajectories')
   plt.legend()
+  plt.axis('equal')
   plt.show()
 
   for i in range(len(poses_from_vo)):
@@ -128,10 +129,18 @@ def main():
     ax = fig.add_subplot(111, projection='3d')
     poses = get_translations_and_orientation_vecs(poses_from_vo[i])
     gt_poses = get_translations_and_orientation_vecs(ground_truth[i])
+
+    firstN = 100 #len(poses)
+    poses = poses[:firstN,:]
+    gt_poses = gt_poses[:firstN,:]
     s, R, t = computeSim3Alignment(poses[:, :3], gt_poses[:, :3])
     aligned_poses = applySim3(poses, s, R, t)
     plot_translations_and_orientation_vecs(aligned_poses, ax, 'r', 'Estimated from DSO')
     plot_translations_and_orientation_vecs(gt_poses, ax, 'k', 'Ground Truth')
+    # to indicate start point
+    ax.plot([aligned_poses[0,0]], [aligned_poses[0,1]], [aligned_poses[0,2]], 'g.')
+    ax.plot([gt_poses[0,0]], [gt_poses[0,1]], [gt_poses[0,2]], 'g.')
+    # corresponding frames
     for j in range(len(aligned_poses)):
       xs = [aligned_poses[j, 0], gt_poses[j, 0]]
       ys = [aligned_poses[j, 1], gt_poses[j, 1]]
@@ -139,6 +148,7 @@ def main():
       ax.plot(xs, ys, zs, 'b-', lw=0.1)
     plt.title('DSO-estimated trajectory, seq-' + str(i))
     plt.legend()
+    plt.axis('equal')
     plt.show()
 
   for train_id in range(len(ground_truth)):
@@ -164,6 +174,7 @@ def main():
       ax.set_zlim3d([-2, 2])
       plt.title('Relocalizing test sequence ' + str(test_id) + ' onto train sequence ' + str(train_id))
       plt.legend()
+      plt.axis('equal')
       plt.show()
 
 
