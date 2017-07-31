@@ -119,17 +119,12 @@ void DenseDescriptorFromCaffe::detectAndCompute(cv::InputArray image,
     matvec.push_back(mat);
     vector<int> labels(1, 0);
 
-    // TODO: this requires mat to be a CV_8U type. However, this network was
-    // trained on float32 types. So I suspect a cast is happening somewhere, and
-    // I'm not sure what the side effects are.
     dataLayer->AddMatVector(matvec, labels);
 
     float loss;
     net->Forward(&loss);
 
     int channels = outputBlob->channels();
-    int width = outputBlob->width();
-    int height = outputBlob->height();
     const float* data = outputBlob->cpu_data();
 
     Mat& desc = descriptors.getMatRef();
@@ -140,7 +135,8 @@ void DenseDescriptorFromCaffe::detectAndCompute(cv::InputArray image,
       int col = static_cast<int>(kp.pt.x);
 
       for (int c = 0; c < channels; ++c) {
-        desc.at<float>(idx, c) = data[col + width * row + width * height * c];
+        int offset = outputBlob->offset(0, c, row, col);
+        desc.at<float>(idx, c) = data[offset];
       }
       ++idx;
     }
