@@ -84,8 +84,6 @@ sdl::SceneParser* parseArguments(int argc, char** argv) {
     cache_dir = fs::path(vm["cache"].as<string>());
   }
 
-  string mapping_method_str = vm["mapping_method"].as<string>();
-
   if (vm.count("scene")) {
     string scene_type(vm["scene"].as<string>());
     // currently only one supported scene
