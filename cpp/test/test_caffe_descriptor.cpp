@@ -130,7 +130,7 @@ bool test_single_layer_net() {
   img.at<cv::Vec3b>(0, 0) = cv::Vec3b(1, 2, 3);
   img.at<cv::Vec3b>(5, 5) = cv::Vec3b(4, 5, 6);
   img.at<cv::Vec3b>(20, 0) = cv::Vec3b(7, 8, 9);
-  img.at<cv::Vec3b>(0, 60) = cv::Vec3b(10, 11, 12);
+  img.at<cv::Vec3b>(0, 60) = cv::Vec3b(253, 254, 255);
 
   SparseMat scene_coords(2, dims, CV_32FC3);
   scene_coords.ref<Vec3f>(0, 0) = Vec3f(1, 2, 3);
@@ -174,9 +174,9 @@ bool test_single_layer_net() {
       assert(descriptors.at<float>(i, 1) == 8);
       assert(descriptors.at<float>(i, 2) == 9);
     } else if (pt.y == 0 && pt.x == 60) {
-      assert(descriptors.at<float>(i, 0) == 10);
-      assert(descriptors.at<float>(i, 1) == 11);
-      assert(descriptors.at<float>(i, 2) == 12);
+      assert(descriptors.at<float>(i, 0) == 253);
+      assert(descriptors.at<float>(i, 1) == 254);
+      assert(descriptors.at<float>(i, 2) == 255);
     } else {
       assert(false);
     }
@@ -187,7 +187,7 @@ bool test_single_layer_net() {
 
 int main(int argc, char** argv) {
   bool any_tests_failed = false;
-    any_tests_failed |= test_loading_simple_caffenet();
+  any_tests_failed |= test_loading_simple_caffenet();
   any_tests_failed |= test_single_layer_net();
   return any_tests_failed;
 }
