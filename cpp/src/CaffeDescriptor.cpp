@@ -88,7 +88,9 @@ DenseDescriptorFromCaffe::DenseDescriptorFromCaffe(
     }
   }
 }
-int DenseDescriptorFromCaffe::descriptorSize() const { return 4; }
+int DenseDescriptorFromCaffe::descriptorSize() const {
+  return outputBlob->num();
+}
 
 void DenseDescriptorFromCaffe::detectAndCompute(cv::InputArray image,
                                                 cv::InputArray mask,

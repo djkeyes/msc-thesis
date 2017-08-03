@@ -432,6 +432,8 @@ int Database::computeDescriptorsForEachFrame(
   int total_descriptors = 0;
 
   int num_displayed = 0;
+  int total_frames = frames->size();
+  int num_processed = 0;
   // iterate through the images
   for (const auto& element : *frames) {
     const auto& frame = element.second;
@@ -460,8 +462,10 @@ int Database::computeDescriptorsForEachFrame(
 
       if (display_keypoints && num_displayed < 5 &&
           !image_keypoints[frame->index].empty()) {
+        // can use DrawMatchesFlags::DRAW_RICH_KEYPOINTS if we're displaying
+        // SIFT
         drawKeypoints(colorImage, image_keypoints[frame->index], colorImage,
-                      Scalar::all(-1), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+                      Scalar::all(-1), DrawMatchesFlags::DEFAULT);
         stringstream ss;
         ss << "Keypoints in frame " << frame->index << " (db=" << frame->dbId
            << ")";
@@ -478,7 +482,16 @@ int Database::computeDescriptorsForEachFrame(
                              image_descriptors[frame->index]);
     }
     total_descriptors += image_descriptors[frame->index].rows;
+
+    if (num_processed % 100 == 0) {
+      cout << "\r " << num_processed << "/" << total_frames << " ("
+           << setprecision(4)
+           << static_cast<double>(num_processed) / total_frames * 100. << "%)"
+           << flush;
+    }
+    ++num_processed;
   }
+  cout << endl;
   return total_descriptors;
 }
 void Database::doClustering(const map<int, Mat>& image_descriptors) {
@@ -730,10 +743,26 @@ void Database::buildInvertedIndex(
         throw runtime_error("Impossible word " + closest_word);
       }
 
-      Map<MatrixXf> descriptor(reinterpret_cast<float*>(descriptors.row(j).data),
-                               descriptor_size, 1);
+      Map<MatrixXf> descriptor(
+          reinterpret_cast<float*>(descriptors.row(j).data), descriptor_size,
+          1);
 
-      inverted_index.AddEntry(entry, closest_word, descriptor);
+      // geometric_burstiness::InvertedIndex expects descriptors to be size 128
+      // :(
+      if (descriptor_size == 128) {
+        inverted_index.AddEntry(entry, closest_word, descriptor);
+      } else if (descriptor_size == 32) {
+        // not sure what to do if descriptor_size > 128
+
+        // just 0-pad the descriptor
+        Eigen::Matrix<float, 128, 1> padded_descriptor;
+        padded_descriptor << descriptor, Eigen::Matrix<float, 96, 1>::Zero();
+
+        inverted_index.AddEntry(entry, closest_word, padded_descriptor);
+      } else {
+        throw runtime_error(
+            "Only descriptors of size 128 and 32 are supported.");
+      }
     }
   }
   cout << " The index contains " << total_number_entries << " entries "
