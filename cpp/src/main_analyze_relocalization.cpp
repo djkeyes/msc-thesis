@@ -14,6 +14,7 @@
 #include "Eigen/Core"
 #include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
+#include "caffe/caffe.hpp"
 #include "opencv2/calib3d/calib3d.hpp"
 #include "opencv2/core/eigen.hpp"
 #include "opencv2/core/operations.hpp"
@@ -24,6 +25,7 @@
 #include "Datasets.h"
 #include "FusedFeatureDescriptors.h"
 #include "Relocalization.h"
+#include "CaffeDescriptor.h"
 
 namespace po = boost::program_options;
 namespace fs = boost::filesystem;
@@ -42,6 +44,10 @@ int vocabulary_size;
 double epsilon_angle_deg;
 double epsilon_translation;
 bool reuse_first_vocabulary;
+
+bool use_caffe_descriptor;
+string caffe_prototxt;
+string caffe_caffemodel;
 
 unique_ptr<SceneParser> scene_parser;
 
@@ -465,8 +471,8 @@ class Match_2d_3d_dlt : public MatchingMethod {
                           const vector<Point2f>& query_pts,
                           const vector<Point2f>& database_pts, Mat& inlier_mask,
                           Mat& R, Mat& t) override {
-    int num_iters = 1000;
-    double confidence = 0.9999999;
+    int num_iters = 10;  // 1000;
+    double confidence = 0.9;  // 0.9999999;
     double ransac_threshold = 8.0;
 
     // lookup scene coords from database_pts
@@ -533,7 +539,13 @@ void parseArguments(int argc, char** argv) {
           " 'DLT' to compute a direct linear transform (requires mapping_method to be specified), or left empty.")
       ("reuse_first_vocabulary", po::value<bool>()->default_value(false), "Compute a visual vocabulary once by clustering "
           "descriptors in the first database, then re-use it in all subsequent databases. Faster, but potentially much less "
-          "accurate.");
+          "accurate.")
+      ("use_caffe_descriptor", po::value<bool>()->default_value(false), "Compute a dense descriptor using the provided"
+          "caffe model in caffe_prototxt and caffe_caffemodel.")
+      ("caffe_prototxt", po::value<string>(), "The prototxt to use to evaulate the descriptor.")
+      ("caffe_caffemodel", po::value<string>(), "The trained caffemodel with associated weights. The argument of "
+          "caffe_prototxt may have a slightly different structure; only layers with matching names will have their weights "
+          "copied over.");
 
   po::options_description commandline_args;
   commandline_args.add(commandline_exclusive).add(general_args);
@@ -622,6 +634,12 @@ void parseArguments(int argc, char** argv) {
     usage(argv, commandline_args);
     exit(1);
   }
+
+  use_caffe_descriptor = vm["use_caffe_descriptor"].as<bool>();
+  if (use_caffe_descriptor) {
+    caffe_prototxt = vm["caffe_prototxt"].as<string>();
+    caffe_caffemodel = vm["caffe_caffemodel"].as<string>();
+  }
 }
 
 }  // namespace sdl
@@ -638,7 +656,15 @@ int main(int argc, char** argv) {
 
   Ptr<Feature2D> detector;
   if (sdl::matching_method->needs3dDatabasePoints()) {
-    detector = Ptr<Feature2D>(new sdl::NearestDescriptorAssigner(*sift));
+    if (sdl::use_caffe_descriptor) {
+      caffe::Caffe::set_mode(caffe::Caffe::Brew::GPU);
+      std::unique_ptr<caffe::Net<float>> net(
+          sdl::readCaffeModel(sdl::caffe_prototxt, sdl::caffe_caffemodel));
+      detector =
+          Ptr<Feature2D>(new sdl::DenseDescriptorFromCaffe(move(net)));
+    } else {
+      detector = Ptr<Feature2D>(new sdl::NearestDescriptorAssigner(*sift));
+    }
   } else {
     detector = sift;
   }
