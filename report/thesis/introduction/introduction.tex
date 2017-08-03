@@ -1,0 +1,52 @@
+\graphicspath{{introduction/}}
+
+\chapter{Introduction}
+\label{cha:introduction}
+
+
+Things to cover:
+-overview of DSO
+-failure case for DSO: pure rotation causes tracking failure. needs relocalization to recover previous scale.
+-comment on semi-dense vs dense methods, advantages vs disadvantages
+	-high quality depth maps even from monocular video, whereas other techniques use stereo, structured light cameras, lidar, etc
+-maybe some background on deep learning, CNNs, descriptor learning, etc
+-maybe some background on image retrieval systems, kd trees vs bag of words, robust camera pose estimation, etc
+
+
+-Experiments:
+-description of each dataset
+-for each TUM dataset:
+	-run DSO on video
+	-align first half of video to ground truth
+	-compute visual odometry error of second half of video
+		-DSO shows some kind of color-coded error
+		-LSD-slam shows absolute trajectory error (computed as RMSE)
+		-7scenes papers typically show num frames localized within some threshold
+		-either compute this over just keyframes, or also over intermediate poses
+	-compute sift descriptors at each keyframe
+		-cluster descriptors (probably only for first video?)
+	-feed training data to (initialized) neural net
+	-compute dense descriptors at each keyframe
+	    -cluster descriptors (I guess separately for each video)
+	-create discloc database using frames in first half of video
+    -for each frame in the second half of the video, relocalize against first frame
+	    -for each relocalized pose, compute same errors as before
+-for each 7scenes dataset:
+	-run DSO on each video
+	-try to align to ground truth, but fail
+	-compute sift descriptors at each keyframe
+	-feed training data from training videos to (un-initialized?) neural net
+	-compute dense descriptors at each keyframe
+	-cluster descriptors
+	-create discloc database--use all train videos somehow? need to store which video is which so we can re-align later.
+	-for each frame in the test videos, relocalize against train set
+	    -for each relocalized pose, compute num frames localized withing threshold
+-for each cambridge landmarks dataset:
+	-do same thing as DSO, if there's time.
+
+	
+	-dk's questions:
+		-how does size of visual vocab affect?
+		-what can we do to improve descriptors? dilation? better training examples?
+
+\cleardoublepage
