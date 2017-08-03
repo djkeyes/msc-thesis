@@ -1,0 +1,124 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Author: First Name Last Name
+% Type: Semester/Master Thesis
+% Title: Thesis Title
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\documentclass[pdflatex,11pt,a4paper,twoside,titlepage]{scrbook}
+
+%---------packages------------------------------------------------------
+
+\usepackage[english]{babel}
+\usepackage[latin1]{inputenc}
+\usepackage{a4wide}
+
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{mathcomp}
+
+%\addtokomafont{disposition}{\rmfamily}				% uncomment for serif fonts for headings KOMA classes
+\usepackage[hang,labelfont=bf]{caption}				% configure captions of images, tables etc.
+%\usepackage[footnotesize,sl,SL,hang,tight]{subfigure}		% helpful package for aligning figures next to each other
+%\usepackage{captcont}						% continue sufigures over several pages
+
+\usepackage{verbatim}
+\usepackage{booktabs}							% publication quality tables for LaTeX
+%\usepackage{multirow}						% cells in tables can span multiple rows
+%\usepackage{rotating}
+\usepackage{fancyhdr}
+
+\usepackage[pdftex]{color,graphicx}
+%\usepackage[hang]{caption}
+\usepackage{subfigure}
+\usepackage{color}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{listings}
+\lstset{keywordstyle=\color{blue}\bfseries\emph, breaklines=true, breakatwhitespace=false}
+\lstset{language=C, basicstyle=\footnotesize, commentstyle=\color{green}}
+\hypersetup
+{
+pdftitle = {Thesis Title},
+pdfauthor = {Name},
+colorlinks = {true},
+hypertexnames={true},
+plainpages={false},
+linkcolor={black},
+citecolor={black},
+filecolor={black},
+urlcolor={black},
+anchorcolor={black},
+menucolor={black},
+breaklinks={true}
+}
+
+%\setlength{\textwidth}{15cm}
+%\setlength{\textheight}{22.0cm}
+%\setlength{\oddsidemargin}{0.75cm}
+%\setlength{\evensidemargin}{-0.3cm}
+%\setlength{\topmargin}{-0.2cm}			% Distance between page top and header
+\setlength{\headheight}{15pt}
+%\setlength{\parskip}{1.5explus0.5ex}
+%\setlength{\parindent}{0pt}				% \noindent
+%\renewcommand{\baselinestretch}{1.2}		% Line distance
+%\setcounter{secnumdepth}{3}			% Displays Section number down to 3 ranks
+%\setcounter{tocdepth}{3}
+
+\newcommand{\clearemptydoublepage}{\newpage{\pagestyle{empty}\cleardoublepage}}
+\newcommand{\st}{\stackrel{*}}
+
+%---------document------------------------------------------------------
+
+\begin{document}
+
+\frontmatter
+
+\input{titlepage}
+\clearemptydoublepage
+\include{abstract}
+\clearemptydoublepage
+\include{acknowledgment}
+\clearemptydoublepage
+
+%list of contents, figures and tables
+\phantomsection
+\addcontentsline{toc}{chapter}{Contents}
+\tableofcontents
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{List of Figures}
+\listoffigures
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{List of Tables}
+\listoftables
+\cleardoublepage
+
+%customize headers and footers
+\pagestyle{fancyplain} % Chapter and Section appear in header
+\renewcommand{\chaptermark}[1]{\markboth{#1}{}} % Changes chapter appearence
+\renewcommand{\sectionmark}[1]{\markright{\thesection\ #1}} % Changes section appearence
+\lhead[\fancyplain{}{\bfseries\thepage}]{\fancyplain{}{\bfseries\rightmark}}
+\rhead[\fancyplain{}{\bfseries\leftmark}]{\fancyplain{}{\bfseries\thepage}}
+%\cfoot{} % removes page number from footer
+\cfoot[\fancyplain{}{}]{\fancyplain{\thepage}{}} %Page number in the first page of a chapter in footer 
+
+%--------- include chapters----------------------------------------------
+\mainmatter
+
+\include{chapter1/chapter1}
+\include{chapter2/chapter2}
+
+\backmatter
+
+%Bibliography
+%\bibliographystyle{IEEEtran}		% use this for electric engineering thesis (contains support for datasheets)
+\bibliographystyle{splncs}		% use this for computer vision thesis
+\bibliography{thesis}
+\cleardoublepage
+
+%\appendix
+%\include{appendix/appendix}
+
+\end{document}

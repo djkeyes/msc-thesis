@@ -24,4 +24,14 @@ octave-workspace
 # Simulink autosave extension
 .autosave
 
+# LaTeX build files
+*.aux
+*.bbl
+*.blg
+*.lof
+*.log
+*.lot
+*.out
+*.synctex.gz
+*.toc
 
