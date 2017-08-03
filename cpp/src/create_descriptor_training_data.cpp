@@ -157,14 +157,7 @@ int main(int argc, char** argv) {
         cv::imwrite((f->cachePath / ss.str()).string(), image);
 
         dso::SE3& pose = poses->at(frame_id);
-        Eigen::Matrix<double, 3, 4> transform = pose.matrix3x4();
-
-        ss.str("");
-        ss << "pose_" << setfill('0') << setw(6) << frame_id << ".bin";
-        ofstream pose_file((f->cachePath / ss.str()).string(),
-                           ios::binary | ios::trunc);
-        pose_file.write(reinterpret_cast<char*>(transform.data()),
-                        sizeof(double) * transform.rows() * transform.cols());
+        f->savePose(pose);
       }
     }
 

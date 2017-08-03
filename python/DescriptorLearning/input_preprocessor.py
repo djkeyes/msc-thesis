@@ -35,23 +35,49 @@ def read_sparse_scene_coords(filename):
   return result
 
 
-def read_transform(filename):
-  rows = 3
-  cols = 4
-  result = np.zeros([rows, cols])
-  with open(filename, 'rb') as f:
-    # Eigen matrices are stored column-major by default
-    for c in range(cols):
-      for r in range(rows):
-        result[r, c] = struct.unpack('=d', f.read(8))[0]
+def read_transform(filename, from_trans_quat=True):
+  if from_trans_quat:
+    rows = 3
+    cols = 4
+    result = np.zeros([rows, cols])
+    with open(filename, 'rb') as f:
+      x = struct.unpack('=d', f.read(8))[0]
+      y = struct.unpack('=d', f.read(8))[0]
+      z = struct.unpack('=d', f.read(8))[0]
+      qx = struct.unpack('=d', f.read(8))[0]
+      qy = struct.unpack('=d', f.read(8))[0]
+      qz = struct.unpack('=d', f.read(8))[0]
+      qw = struct.unpack('=d', f.read(8))[0]
 
-  R = result[:,0:3]
-  t = result[:,3]
-  t = t.reshape([3, 1])
+    R = np.asarray([
+      [qw*qw+qx*qx-qy*qy-qz*qz, 2*(qx*qy-qw*qz), 2*(qz*qx+qw*qy)],
+      [2*(qx*qy+qw*qz), qw*qw-qx*qx+qy*qy-qz*qz, 2*(qy*qz-qw*qx)],
+      [2*(qz*qx-qw*qy), 2*(qy*qz+qw*qx), qw*qw-qx*qx-qy*qy+qz*qz]
+    ])
+    t = np.asarray([x, y, z])
 
-  R = R.T
-  t = -R.dot(t)
-  result = np.hstack([R, t])
+    t = t.reshape([3, 1])
+
+    R = R.T
+    t = -R.dot(t)
+    result = np.hstack([R, t])
+  else:
+    rows = 3
+    cols = 4
+    result = np.zeros([rows, cols])
+    with open(filename, 'rb') as f:
+      # Eigen matrices are stored column-major by default
+      for c in range(cols):
+        for r in range(rows):
+          result[r, c] = struct.unpack('=d', f.read(8))[0]
+
+    R = result[:,0:3]
+    t = result[:,3]
+    t = t.reshape([3, 1])
+
+    R = R.T
+    t = -R.dot(t)
+    result = np.hstack([R, t])
 
   return result
 
@@ -122,11 +148,11 @@ class ImageVertexTransformLayer(caffe.Layer):
 
         projected_B = transform_B.dot(np.append(coords, 1))
         projected_A = transform_A.dot(np.append(coords, 1))
-        uB = int(round(projected_B[0]/projected_B[2]*153.6 + 191.5))
-        vB = int(round(projected_B[1]/projected_B[2]*152.64 + 143.5))
+        uB = int(round(projected_B[0]/projected_B[2]*277.34 + 312.234))
+        vB = int(round(projected_B[1]/projected_B[2]*291.402 + 239.777))
 
-        uA = int(round(projected_A[0]/projected_A[2]*153.6 + 191.5))
-        vA = int(round(projected_A[1]/projected_A[2]*152.64 + 143.5))
+        uA = int(round(projected_A[0]/projected_A[2]*277.34 + 312.234))
+        vA = int(round(projected_A[1]/projected_A[2]*291.402 + 239.777))
 
         if uB < 0 or vB < 0 or uB >= image_A.shape[1] or vB >= image_A.shape[0] or projected_B[2] <= 0:
           num_oob += 1
@@ -134,15 +160,15 @@ class ImageVertexTransformLayer(caffe.Layer):
         if uA < 0 or vA < 0 or uA >= image_A.shape[1] or vA >= image_A.shape[0] or projected_A[2] <= 0:
           num_oob += 1
           continue
-        if count % 20 == 0:
-          rr, cc = line(row, col, vB, image_A.shape[1] + uB)
-          stereo[rr, cc, 0] = 0
-          stereo[rr, cc, 1] = 1.0
-          stereo[rr, cc, 2] = 0
-          rr, cc = line(row, col, vA, uA)
-          stereo[rr, cc, 0] = 1.0
-          stereo[rr, cc, 1] = 0
-          stereo[rr, cc, 2] = 0
+        # if count % 20 == 0:
+        #   rr, cc = line(row, col, vB, image_A.shape[1] + uB)
+        #   stereo[rr, cc, 0] = 0
+        #   stereo[rr, cc, 1] = 1.0
+        #   stereo[rr, cc, 2] = 0
+        #   rr, cc = line(row, col, vA, uA)
+        #   stereo[rr, cc, 0] = 1.0
+        #   stereo[rr, cc, 1] = 0
+        #   stereo[rr, cc, 2] = 0
     print "num oob: ", num_oob, "/", count
     # plt.imshow(stereo)
     # plt.show()
@@ -241,6 +267,12 @@ def load_data(directory, image_file, scene_coord_file, transform_file):
   image = image.astype(np.float32)
   scene_coords = scene_coords.astype(np.float32)
   transform = transform.astype(np.float32)
+
+  # I guess we should just be able to crop it, since the origin is (and hence the camera principle point is relative to)
+  # the corner of the image?
+  #n = 3
+  #image = image[0:n*3*32, 0:n*4*32, :]
+  #scene_coords = scene_coords[0:n*3*32, 0:n*4*32, :]
 
   if np.any(np.isnan(transform)):
     # Sometimes transforms recorded from DSO can contain nan values. I
