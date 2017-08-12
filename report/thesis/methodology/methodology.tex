@@ -1,0 +1,39 @@
+\chapter{Method Overview}
+
+
+% TODO: make a figure showing the pipeline as a flowchart
+
+We perform relocalization in several steps. First, to create an initial map of a scene, we perform visual odometry using DSO on each of a set of training videos. For each training sequence, this yields a set of per-frame camera poses and estimated semi-dense point clouds, plus an adjacency list of frames with co-observed points. We then extract features from each keyframe; rather than using an explicit feature detector, we simply evaluate the descriptor at every defined pixel in the semi-dense depth map. In a second pass, we merge multiple keyframe observations of the same point by computing the mean descriptor value, as in [CITE TORSTEN'S PAPER].
+
+In order to perform efficient retrieval of similar images, we compute an inverted index. We cluster features in the training set to create a visual word vocabulary and use the vocabulary to index training keyframes. We use the implementation of [CITE TORSTEN'S PAPER], which additionally filters results by their Hamming embeddings in order to remain descriminative while using a smaller visual vocabulary.
+
+Finally, to relocalize, we compute descriptors for each frame in the test set, again at defined locations in the depth map. Note however that for the test set, we discard the depth information and do not compute the mean descriptor values, so that each test frame can be evaluated independently. Querying the inverted index now returns a list of plausible matches in the training set for each query frame in the test set. We then compute a set of feature correspondences between each training and test frame, which thereby can be used with a RANSAC Perspective-n-Point solver to find the query pose (in the training sequence's frame of reference). We perform geometric verification, i.e.\ compute poses from the top 50 retrieved images, and return the one with the most inlier correspondences.
+
+\section{Visual Odometry}
+-run DSO to get map (include algorithm? bookkeeping? note on how things are marginalized?)
+
+\section{Feature Extraction}
+In our experiments, we test two kinds of visual features. As a baseline, we use the well-known SIFT feature. We compare this to the learned features of [CITE TANNER'S PAPER], which has demonstrated state-of-the-art performance for use in camera relocalization.
+
+In practice, to extract SIFT features, we first detect a large quantity of SIFT keypoints. Then, for each depth pixel, the closest SIFT keypoint within a small radius ($r=3$ pixels) is assigned. This can be efficiently implemented by, for example, binning features detected in the image into $r \times r$ squares and only checking adjacent bins. After performing this process, some depth pixels may be discarded, e.g.\ if they are not near a peak in the SIFT feature response space, and vice versa.
+
+In contrast to this, it seems reasonable to train a dense descriptor (DEFINE WHAT THAT MEANS), so that we can evaluate it at any point in a semi-dense depth map by simply sampling a pixel of the dense descriptor. TODO: GIVE OVERVIEW OF TANNER'S PAPER
+
+\section{Training a Visual Vocabulary}
+	
+-for all training images, do clustering
+	-approximate clustering
+	-assign to clusters
+
+\section{Building the Inverted Index}
+-create visual words database
+	-description of torsten's stuff? hamming embeddings? inverted index? visual words voting? normalization?
+
+
+-image matching
+	-ratio test. maybe some pseudocode? reference to lowe's paper?
+-geometric verification
+	-space for PnP derivation? or the definition at least?
+-alignment onto original VO and onto GT trajectories
+	-sim3 alignment
+	-computing relative camera pose, rescaling transformation
