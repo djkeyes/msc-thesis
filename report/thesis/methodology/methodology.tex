@@ -13,22 +13,85 @@ Finally, to relocalize, we compute descriptors for each frame in the test set, a
 -run DSO to get map (include algorithm? bookkeeping? note on how things are marginalized?)
 
 \section{Feature Extraction}
-In our experiments, we test two kinds of visual features. As a baseline, we use the well-known SIFT feature. We compare this to the learned features of [CITE TANNER'S PAPER], which has demonstrated state-of-the-art performance for use in camera relocalization.
+In our experiments, we test two kinds of visual features. As a baseline, we use the well-known SIFT feature \cite{lowe1999object}. We compare this to the learned features of Schmidt \textit{et al}.\ \cite{schmidt2017self}, which has demonstrated state-of-the-art performance for use in camera relocalization.
 
-In practice, to extract SIFT features, we first detect a large quantity of SIFT keypoints. Then, for each depth pixel, the closest SIFT keypoint within a small radius ($r=3$ pixels) is assigned. This can be efficiently implemented by, for example, binning features detected in the image into $r \times r$ squares and only checking adjacent bins. After performing this process, some depth pixels may be discarded, e.g.\ if they are not near a peak in the SIFT feature response space, and vice versa.
+In practice, to extract SIFT features, we first detect a large quantity of SIFT keypoints. Then, for each depth pixel, the closest SIFT keypoint within a small radius ($r=3$ pixels) is assigned. This can be efficiently implemented by, for example, binning features detected in the image into $r \times r$ squares and only checking adjacent bins. After performing this process, some depth pixels may be discarded, e.g.\ if they are not near a peak in the SIFT feature response space, and vice versa. We use the 128-dimensional SIFT descriptor implemented in the popular OpenCV library \cite{opencv_library}.
 
-In contrast to this, it seems reasonable to train a dense descriptor (DEFINE WHAT THAT MEANS), so that we can evaluate it at any point in a semi-dense depth map by simply sampling a pixel of the dense descriptor. TODO: GIVE OVERVIEW OF TANNER'S PAPER
+In contrast to this, it seems reasonable to create a dense descriptor. Formally, this is a function $f : \mathbb{R}^{W \times H \times 3} \to \mathbb{R}^{W \times H \times D} $ that maps from RGB color images to an image with $D$ channels in each pixel. We choose $D=32$, which provides good performance at 1/4th the memory size of typical SIFT features. These channels represent a descriptor for that pixel, for which it would be desirable if multiple views of the same 3D point evaluated to nearby descriptors and views of disparate points were far away. This representation would be convenient for our purposes, as we could evaluate it at any point in a semi-dense depth map by simply sampling a pixel of the dense descriptor.
+
+In Schmidt \textit{et al}.\ \cite{schmidt2017self}, the authors train a dense descriptor based on KinectFusion \cite{newcombe2011kinectfusion}. They represent the world as a set of camera poses and a set of 3D mesh vertices, together with a list of which vertices are observed by which cameras. This is equivalent to the output of DSO, in which our latent world representation is 3D pointcloud. 
+
+(TODO: DEFINE SOME PROJECTIVE GEOMETRY STUFF BEFORE THIS POINT.)
+
+Suppose we have an image $I$, a projection function $\Pi$ containing the camera's intrinsic parameters, and extrinsic parameters of the camera $(R, t)$, so that an observed point $X \in \mathbb{R}^3$ in the world reference maps to a point $u \in \mathbb{R}^2$ on the image plane in the following way:
+\begin{equation}
+u = \Pi(RX + t)
+\end{equation}
+
+For example, for a pinhole camera model, $\Pi$ represents multiplication by a pinhole calibration matrix followed by a nonlinear projection:
+
+\begin{equation}
+\Pi(X) = 
+\begin{bmatrix}
+	\frac{X'_0}{X'_2} \\
+	\frac{X'_1}{X'_2}
+\end{bmatrix}
+\text{, where } X' = KX =
+	\begin{bmatrix}
+	f_x & \alpha & c_x \\
+	0 & f_y & c_y \\
+	0 & 0 & 1
+	\end{bmatrix} X
+\end{equation}
+
+Consequentially, the descriptor associated with a point $X$ observed in image $I$ is computed as $f(I)(u) = f(I)(\Pi(RX + t))$, where the second set of parentheses indicate a lookup in rows and columns of the dense descriptor matrix. Note that for DSO, if the camera is a host frame for $X$, then $u$ will have integer coordinates, but otherwise in general $X$ may project to coordinates between pixels. In this case, we can bilinearly interpolate descriptors, i.e.\ defining $\underline{u}_i$ and $\overline{u}_i$ as the floor and ceiling, respectively, of $u_i$, the interpolated value is a weighted average:
+
+\begin{equation}
+\begin{aligned}
+f(I)(u) &= (\overline{u}_0 - u_0) (\overline{u}_1 - u_1) f(I)(\underline{u}_0, \underline{u}_1) \\
+        &+ (u_0 - \underline{u}_0) (\overline{u}_1 - u_1) f(I)(\overline{u}_0, \underline{u}_1) \\
+        &+ (\overline{u}_0 - u_0) (u_1 - \underline{u}_1) f(I)(\underline{u}_0, \overline{u}_1) \\
+        &+ (u_0 - \underline{u}_0) (u_1 - \underline{u}_1) f(I)(\overline{u}_0, \overline{u}_1)
+\end{aligned}
+\end{equation}
+
+Conceptually, for two images $I_a$ and $I_b$ with a camera model $\Pi$ and respective world-to-camera transforms $(R_a, t_a)$ and $(R_b, t_b)$, we would like a loss function which penalizes descriptor distance for the same point and rewards descriptor distance for different points. Schmidt \textit{et al}.\ propose to do this simply with contrastive loss between a point $X$ observed by camera $a$ and a point $Y$ observed by camera $b$. For image points $u_a = \Pi(R_a X + t_a)$ and $u_b = \Pi(R_b X + t_b)$, the loss is defined as:
+
+\begin{equation}
+L(I_a, I_b, u_a, u_b) = \begin{cases}
+d(I_a, I_b, u_a, u_b)^2 , & \text{if}\ X = Y \\
+\max(0, M - d(I_a, I_b, , u_a, u_b)^2, & \text{if}\ X \ne Y
+\end{cases}
+\end{equation}
+
+Here $d : \mathbb{R}^D \to \mathbb{R}$ a distance function between the interpolated descriptors. We use simply the L2 norm:
+
+\begin{equation}
+d(I_a, I_b, u_a, u_b) = ||f(I_a)(u_a) - f(I_b)(u_b)||_2
+\end{equation}
+
+This loss is applied to the fully convolutional neural network architecture of Long \textit{et al}.\ \cite{long2015fully}, which has proven to be state-of-the-art for semantic image segmentation, and which itself was based on the well-received work of Simonyan and Zisserman \cite{simonyan2014very} for classification. This fully convolutional architecture is advantageous for several reasons, namely that it can be applied to images of any input dimensions and that the parameter sharing allows for fewer total parameters and more efficient implementations than approaches with densely-connected layers.
+
+(COULD PUT A DIAGRAM OF THE NETWORK HERE, OR DESCRIBE THE ARCHITECTURE / CONVOLUTION LAYERS IN MORE DETAIL. IT'S ACTUALLY SORT OF NUANCED)
 
 \section{Training a Visual Vocabulary}
-	
--for all training images, do clustering
-	-approximate clustering
-	-assign to clusters
+
+After feature detection and descriptor computation, our images are now represented as a large ordered collection of high-dimensional ($D=128$ for SIFT and $D=32$ for learned features) features. We adopt the typical approach for image recognition, which is to represent the images instead as an unordered multiset (or bag) of quantized features (or visual words). In our circumstances, we have several million descriptors per training set, and we would like to quantize these to around $K=1000$ clusters.
+
+Performing K-means clustering naively using Lloyd's algorithm \cite{lloyd1982least} on $N$ points requires $\mathcal{O}(N K D + K D) = \mathcal{O}(N K D)$ operations per update step, split between the assignment step and mean update step. Instead, we follow the approximate K-means approach of Philbin \textit{et al}.\ \cite{philbin2007object}. This replaces the costly assignment step of Lloyd's algorithm by constructing a kd-tree of cluster centers and then searches the tree for each the closest cluster center to each datapoint. This results in an asymptotic runtime of $\mathcal{O}(K \log K + N D \log K + K D)$, which is a strict improvement for $N > K$. Rather than performing exact lookups in the kd-tree, Philbin \textit{et al}.'s approach uses an ensemble of fixed-depth trees, resulting in even faster (but approximate) lookups.
+
+(COULD GIVE PSEUDOCODE FOR THIS ALGORITHM, PARTICULARLY SINCE YOU RE-IMPLEMENTED IT TO PLAY WELL WITH OPENCV)
+
+After training, each feature is assigned to its nearest cluster center, and therefore images are represented as a sparse vector of visual word frequencies.
 
 \section{Building the Inverted Index}
+
+A key advantage of representing images as histograms of visual words is ease of retrieval.
 -create visual words database
 	-description of torsten's stuff? hamming embeddings? inverted index? visual words voting? normalization?
 
+
+\section{Image Retrieval and Robust Pose Estimation}
 
 -image matching
 	-ratio test. maybe some pseudocode? reference to lowe's paper?
