@@ -3,8 +3,11 @@
 #define SRC_DATASETS_H_
 
 #include <map>
+#include <set>
+#include <string>
 #include <tuple>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "opencv2/core/mat.hpp"
@@ -37,8 +40,10 @@ class SceneParser {
    * Parse a scene into a set of databases and a set of queries (which may be
    * built from overlapping data).
    */
-  virtual void parseScene(std::vector<sdl::Database>& dbs,
-                          std::vector<sdl::Query>& queries) = 0;
+  virtual void parseScene(
+      std::vector<sdl::Database>& dbs,
+      std::vector<std::pair<std::vector<std::reference_wrapper<sdl::Database>>,
+                            std::vector<sdl::Query>>>& dbs_with_queries) = 0;
 
   /*
    * Given a frame, load the ground truth pose (as a rotation and translation
@@ -54,13 +59,34 @@ class SceneParser {
   boost::filesystem::path cache;
 };
 
+class CambridgeLandmarksParser : public SceneParser {
+ public:
+  explicit CambridgeLandmarksParser(const boost::filesystem::path& directory)
+      : directory(directory) {}
+  virtual ~CambridgeLandmarksParser() {}
+  void parseScene(
+      std::vector<sdl::Database>& dbs,
+      std::vector<std::pair<std::vector<std::reference_wrapper<sdl::Database>>,
+                            std::vector<sdl::Query>>>& dbs_with_queries)
+      override;
+  virtual void loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
+                                   cv::Mat& translation);
+
+ private:
+  boost::filesystem::path directory;
+  std::set<std::string> accumulateSubdirsFromFile(const std::string& filename);
+};
+
 class SevenScenesParser : public SceneParser {
  public:
   explicit SevenScenesParser(const boost::filesystem::path& directory)
       : directory(directory) {}
   virtual ~SevenScenesParser() {}
-  virtual void parseScene(std::vector<sdl::Database>& dbs,
-                          std::vector<sdl::Query>& queries);
+  void parseScene(
+      std::vector<sdl::Database>& dbs,
+      std::vector<std::pair<std::vector<std::reference_wrapper<sdl::Database>>,
+                            std::vector<sdl::Query>>>& dbs_with_queries)
+      override;
   virtual void loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
                                    cv::Mat& translation);
 
@@ -73,8 +99,11 @@ class TumParser : public SceneParser {
   explicit TumParser(const boost::filesystem::path& directory)
       : directory(directory) {}
   virtual ~TumParser() {}
-  virtual void parseScene(std::vector<sdl::Database>& dbs,
-                          std::vector<sdl::Query>& queries);
+  void parseScene(
+      std::vector<sdl::Database>& dbs,
+      std::vector<std::pair<std::vector<std::reference_wrapper<sdl::Database>>,
+                            std::vector<sdl::Query>>>& dbs_with_queries)
+      override;
 
   virtual void loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
                                    cv::Mat& translation);

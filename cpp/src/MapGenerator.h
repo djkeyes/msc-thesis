@@ -36,9 +36,13 @@ class DsoMapGenerator {
  public:
   DsoMapGenerator(int argc, char** argv);
   explicit DsoMapGenerator(const std::string& input_path);
+  DsoMapGenerator(const std::string& image_path,
+                                   const std::string& calib_path,
+                                   bool save_non_keyframes_for_testing);
   DsoMapGenerator(cv::Mat camera_calib, int width, int height,
                   const std::vector<std::string>& image_paths,
-                  const std::string& cache_path);
+                  const std::string& cache_path,
+                  bool save_non_keyframes_for_testing);
 
   void runVisualOdometry(const std::vector<int>& indices_to_play);
   void runVisualOdometry();
@@ -78,6 +82,7 @@ class DsoMapGenerator {
   std::unique_ptr<std::map<int, std::set<int>>> cameraAdjacencyList;
 
   std::unique_ptr<DsoDatasetReader> datasetReader;
+  bool saveNonKeyFramesForTesting = false;
 };
 }  // namespace sdl
 

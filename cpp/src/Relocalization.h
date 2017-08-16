@@ -98,7 +98,9 @@ class Database {
   void addFrame(std::unique_ptr<Frame> frame);
   std::map<int, std::unique_ptr<Frame>>* getFrames() { return frames.get(); }
 
-  std::vector<Result> lookup(Query& query, unsigned int num_to_return);
+  std::vector<Result> lookup(
+      Query& query, unsigned int num_to_return,
+      std::vector<std::reference_wrapper<Database>>& all_training_dbs);
 
   void setVocabularySize(int size) { vocabulary_size = size; }
   void setMapper(std::unique_ptr<DsoMapGenerator> map_gen);
@@ -107,7 +109,13 @@ class Database {
       cv::Ptr<cv::DescriptorExtractor> descriptor_extractor);
   void setBowExtractor(
       cv::Ptr<cv::BOWSparseImgDescriptorExtractor> bow_extractor);
-  void train();
+  void runVoAndComputeDescriptors();
+  void assignAndBuildIndex(
+      std::vector<std::reference_wrapper<Database>>& all_training_dbs);
+
+  void setTrainOnFirstHalf(bool train_on_first_half) {
+    trainOnFirstHalf = train_on_first_half;
+  }
 
   void setCachePath(boost::filesystem::path path) { cachePath = path; }
 
@@ -131,10 +139,11 @@ class Database {
   unsigned int db_id;
 
  private:
+  bool trainOnFirstHalf;
+
   boost::filesystem::path getVocabularyFilename() const;
   bool loadVocabulary(cv::Mat& vocabularyOut) const;
   void saveVocabulary(const cv::Mat& vocabulary) const;
-
 
   // Utility functions used in train()
   void doMapping();
@@ -143,22 +152,37 @@ class Database {
   int computeDescriptorsForEachFrame(
       std::map<int, std::vector<cv::KeyPoint>>& image_keypoints,
       std::map<int, cv::Mat>& image_descriptors);
-  void doClustering(const std::map<int, cv::Mat>& image_descriptors);
+  int loadAllDescriptors(
+      std::map<int, std::map<int, std::vector<cv::KeyPoint>>>& image_keypoints,
+      std::map<int, std::map<int, cv::Mat>>& image_descriptors,
+      std::vector<std::reference_wrapper<Database>>& all_training_dbs);
+  boost::filesystem::path mergedDescriptorsFileFlag();
+  bool hasCoobservedDescriptors();
+  void mergeCoobservedDescriptors(
+      const std::map<int, std::vector<cv::KeyPoint>>& image_keypoints,
+      const std::map<int, cv::Mat>& image_descriptors);
+  void doClustering(
+      const std::map<int, std::map<int, cv::Mat>>& image_descriptors,
+      std::vector<std::reference_wrapper<Database>>& all_train_dbs);
   std::map<int, std::vector<int>> computeBowDescriptors(
       const std::map<int, cv::Mat>& image_descriptors);
-  Eigen::MatrixXf generateRandomProjection(int descriptor_size, int num_rows);
+  Eigen::MatrixXf generateRandomProjection(int num_rows);
   Eigen::MatrixXf computeHammingThresholds(
       const Eigen::MatrixXf& projection_matrix,
-      const std::map<int, cv::Mat>& image_descriptors,
-      const std::map<int, std::vector<int>> descriptor_assignments);
+      const std::map<int, std::map<int, cv::Mat>>& image_descriptors,
+      const std::map<int, std::map<int, std::vector<int>>>
+          descriptor_assignments,
+      std::vector<std::reference_wrapper<Database>>& all_training_dbs);
   struct InvertedIndexImpl;
   boost::filesystem::path getInvertedIndexFilename() const;
   boost::filesystem::path getInvertedIndexWeightsFilename() const;
   bool loadInvertedIndex(InvertedIndexImpl& inverted_index_impl) const;
   void saveInvertedIndex(const InvertedIndexImpl& inverted_index_impl) const;
   void buildInvertedIndex(
-      const std::map<int, std::vector<cv::KeyPoint>>& image_keypoints,
-      const std::map<int, cv::Mat>& image_descriptors);
+      const std::map<int, std::map<int, std::vector<cv::KeyPoint>>>&
+          image_keypoints,
+      const std::map<int, std::map<int, cv::Mat>>& image_descriptors,
+      std::vector<std::reference_wrapper<Database>>& all_training_dbs);
 
   boost::filesystem::path cachePath;
 
@@ -178,6 +202,11 @@ class Database {
 
   cv::Mat K_;
 };
+
+std::map<int, cv::DMatch> doRatioTest(cv::Mat query_descriptors,
+                                      cv::Mat db_descriptors,
+                                      cv::Ptr<cv::DescriptorMatcher> matcher,
+                                      double ratio_threshold);
 }  // namespace sdl
 
 #endif /* SRC_RELOCALIZATION_H_ */

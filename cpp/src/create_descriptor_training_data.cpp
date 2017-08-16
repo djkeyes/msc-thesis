@@ -2,6 +2,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Eigen/Core"
@@ -33,7 +34,7 @@ sdl::SceneParser* parseArguments(int argc, char** argv) {
   po::options_description general_args(
       "Allowed options from terminal or config file");
   general_args.add_options()
-      ("scene", po::value<string>(), "Type of scene. Currently the only allowed type is 7scenes.")
+      ("scene", po::value<string>(), "Type of scene. Currently the only allowed type is 7scenes, tum, or cambridge.")
       ("datadir", po::value<string>()->default_value(""), "Directory of the scene dataset. For datasets composed"
           " of several scenes, this should be the appropriate subdirectory.")
       ("cache", po::value<string>()->default_value(""), "Directory to cache intermediate results, ie"
@@ -79,10 +80,7 @@ sdl::SceneParser* parseArguments(int argc, char** argv) {
   }
   po::notify(vm);
 
-  fs::path cache_dir;
-  if (vm.count("cache")) {
-    cache_dir = fs::path(vm["cache"].as<string>());
-  }
+  fs::path cache_dir = fs::path(vm["cache"].as<string>());
 
   if (vm.count("scene")) {
     string scene_type(vm["scene"].as<string>());
@@ -90,16 +88,18 @@ sdl::SceneParser* parseArguments(int argc, char** argv) {
     if (scene_type.find("7scenes") == 0) {
       fs::path directory(vm["datadir"].as<string>());
       sdl::SevenScenesParser* parser = new sdl::SevenScenesParser(directory);
-      if (!cache_dir.empty()) {
-        parser->setCache(cache_dir);
-      }
+      parser->setCache(cache_dir);
       return parser;
     } else if (scene_type.find("tum") == 0) {
       fs::path directory(vm["datadir"].as<string>());
       sdl::TumParser* parser = new sdl::TumParser(directory);
-      if (!cache_dir.empty()) {
-        parser->setCache(cache_dir);
-      }
+      parser->setCache(cache_dir);
+      return parser;
+    } else if (scene_type.find("cambridge") == 0) {
+      fs::path directory(vm["datadir"].as<string>());
+      sdl::CambridgeLandmarksParser* parser =
+          new sdl::CambridgeLandmarksParser(directory);
+      parser->setCache(cache_dir);
       return parser;
     } else {
       cout << "Invalid value for argument 'scene'." << endl;
@@ -117,11 +117,12 @@ int main(int argc, char** argv) {
   unique_ptr<sdl::SceneParser> scene_parser(parseArguments(argc, argv));
 
   vector<sdl::Database> dbs;
-  vector<sdl::Query> queries;
+  vector<pair<vector<reference_wrapper<sdl::Database>>, vector<sdl::Query>>>
+      dbs_with_queries;
 
   // This loads both databases and queries (ie to do end-to-end experiments),
   // but we're only interested in the frames stored in the database
-  scene_parser->parseScene(dbs, queries);
+  scene_parser->parseScene(dbs, dbs_with_queries);
 
   for (int i = dbs.size() - 1; i >= 0; --i) {
     auto& db = dbs[i];
@@ -132,6 +133,7 @@ int main(int argc, char** argv) {
         static_cast<sdl::DsoMapGenerator*>(db.getMapper());
     map<int, unique_ptr<sdl::Frame>>* frames = db.getFrames();
 
+
     // first run the full mapping algorithm
     map_gen->runVisualOdometry();
 
@@ -141,12 +143,18 @@ int main(int argc, char** argv) {
         map_gen->getSceneCoordinateMaps();
     map<int, dso::SE3>* poses = map_gen->getPoses();
 
-    for (unsigned int frame_id = 0; frame_id < frames->size(); ++frame_id) {
+    for (unsigned int frame_id = 0; frame_id <= frames->size(); ++frame_id) {
       auto iter = scene_coordinate_maps.find(frame_id);
       if (iter == scene_coordinate_maps.end() ||
           poses->find(frame_id) == poses->end()) {
         continue;
       } else {
+        // this is really only necessary because some datasets are 1-indexed and
+        // some are 0-indexed
+        if (frames->find(frame_id) == frames->end()) {
+          continue;
+        }
+
         sdl::Frame* f = frames->at(frame_id).get();
         f->saveSceneCoordinates(iter->second);
 

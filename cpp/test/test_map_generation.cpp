@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Datasets.h"
@@ -99,9 +100,10 @@ bool test_map_generation(const string& data_dir, const string& cache_dir) {
   parser->setCache(cache_dir);
 
   vector<sdl::Database> dbs;
-  vector<sdl::Query> queries;
+  vector<pair<vector<reference_wrapper<sdl::Database>>, vector<sdl::Query>>>
+      dbs_with_queries;
 
-  parser->parseScene(dbs, queries);
+  parser->parseScene(dbs, dbs_with_queries);
   for (int i = dbs.size() - 1; i >= 0; --i) {
     auto& db = dbs[i];
 

@@ -10,6 +10,8 @@
 
 #include "LargeBagOfWords.h"
 
+using std::vector;
+
 namespace cv {
 
 const int kdtree_numtrees = 8;
@@ -359,21 +361,26 @@ CV_WRAP BOWSparseImgDescriptorExtractor::BOWSparseImgDescriptorExtractor(
 BOWSparseImgDescriptorExtractor::~BOWSparseImgDescriptorExtractor() {}
 
 void BOWSparseImgDescriptorExtractor::computeAssignments(
-    InputArray keypointDescriptors, std::vector<int>& assignmentsOut) {
+    InputArray keypointDescriptors, vector<vector<int>>& assignmentsOut,
+    int num_nearest_neighbors) {
   CV_Assert(!vocabulary.empty());
 
   // Match keypoint descriptors to cluster center (to vocabulary)
-  std::vector<DMatch> matches;
-  dmatcher->match(keypointDescriptors, matches);
+  vector<vector<DMatch>> matches;
+  dmatcher->knnMatch(keypointDescriptors, matches, num_nearest_neighbors);
 
   assignmentsOut.reserve(matches.size());
 
-  for (size_t i = 0; i < matches.size(); i++) {
-    int queryIdx = matches[i].queryIdx;
-    int trainIdx = matches[i].trainIdx;
-    CV_Assert(queryIdx == static_cast<int>(i));
+  for (size_t i = 0; i < matches.size(); ++i) {
+    assignmentsOut.emplace_back();
+    assignmentsOut.back().reserve(matches[i].size());
+    for (size_t j = 0; j < matches[i].size(); ++j) {
+      int queryIdx = matches[i][j].queryIdx;
+      int trainIdx = matches[i][j].trainIdx;
+      CV_Assert(queryIdx == static_cast<int>(i));
 
-    assignmentsOut.push_back(trainIdx);
+      assignmentsOut.back().push_back(trainIdx);
+    }
   }
 }
 }  // namespace cv

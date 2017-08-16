@@ -160,6 +160,8 @@ struct DsoOutputRecorder : public Output3DWrapper {
   unique_ptr<map<int, int>> frameIdToIncomingId;
   unique_ptr<map<int, list<Vec3>>> covisibleMarginalizedPoints;
   CalibHessian* latestCalibHessian;
+  bool saveNonKeyFramesForTesting;
+  set<int> removeSceneCoordIfKeyframe;
 
   const double my_scaledTH = 1;      // 1e10;
   const double my_absTH = 1;         // 1e10;
@@ -176,7 +178,8 @@ struct DsoOutputRecorder : public Output3DWrapper {
         latestConnectivity(nullptr),
         frameIdToIncomingId(new map<int, int>()),
         covisibleMarginalizedPoints(new map<int, list<Vec3>>()),
-        latestCalibHessian(nullptr) {}
+        latestCalibHessian(nullptr),
+        saveNonKeyFramesForTesting(false) {}
 
   void publishGraph(
       const map<uint64_t, Eigen::Vector2i, less<uint64_t>,
@@ -228,6 +231,11 @@ struct DsoOutputRecorder : public Output3DWrapper {
     }
     list<ColoredPoint>* current_points = local_points_iter->second.second.get();
 
+    if (removeSceneCoordIfKeyframe.find(frame_id) !=
+        removeSceneCoordIfKeyframe.end()) {
+      removeSceneCoordIfKeyframe.erase(frame_id);
+      sceneCoordinateMaps->erase(frame_id);
+    }
     auto scene_points_iter = sceneCoordinateMaps->find(frame_id);
     if (scene_points_iter == sceneCoordinateMaps->end()) {
       int dims[] = {hG[0], wG[0]};
@@ -296,6 +304,11 @@ struct DsoOutputRecorder : public Output3DWrapper {
           // If the frame has already been marginalized, the target pointer is
           // invalid. DSO performs this check for fh->pointHessians, but not
           // for fh->pointHessiansMarginalized or other PointHessian vectors
+          if (removeSceneCoordIfKeyframe.find(residual->targetIncomingId) !=
+              removeSceneCoordIfKeyframe.end()) {
+            removeSceneCoordIfKeyframe.erase(residual->targetIncomingId);
+            sceneCoordinateMaps->erase(residual->targetIncomingId);
+          }
           if (sceneCoordinateMaps->find(residual->targetIncomingId) !=
               sceneCoordinateMaps->end()) {
             continue;
@@ -351,7 +364,48 @@ struct DsoOutputRecorder : public Output3DWrapper {
   }
 
   void publishCamPose(FrameShell* frame, CalibHessian* HCalib) override {
-    // this pose is not very accurate, just wait the marginalized ones
+    // this pose is not very accurate, so usually just wait the marginalized
+    // ones
+    if (saveNonKeyFramesForTesting) {
+      posesById->insert(make_pair(frame->incoming_id, frame->camToWorld));
+
+      // For non-keyframes, this is the last chance we ever get to access their
+      // data.
+      // So go ahead and do DSO-style "feature" detection
+      FrameHessian* fh = frame->fh;
+
+      PixelSelector selector(wG[0], hG[0]);
+      selector.currentPotential = 3;
+      vector<float> map_out(wG[0] * hG[0]);
+
+      selector.makeMaps(fh, &map_out[0], setting_desiredImmatureDensity);
+
+      int dims[] = {hG[0], wG[0]};
+      cv::SparseMat scene_coord_map(2, dims, CV_32FC3);
+      for (int y = patternPadding + 1; y < hG[0] - patternPadding - 2; y++) {
+        for (int x = patternPadding + 1; x < wG[0] - patternPadding - 2; x++) {
+          int i = x + y * wG[0];
+          if (map_out[i] == 0) continue;
+
+          // map_out[i] contains 1, 2, or 3. 1 is the best, 3 is the worst, but
+          // the difference doesn't really matter for us.
+
+          float nan = numeric_limits<float>::quiet_NaN();
+          scene_coord_map.ref<cv::Vec3f>(y, x) = cv::Vec3f(nan, nan, nan);
+        }
+      }
+
+      if (sceneCoordinateMaps->find(frame->incoming_id) !=
+          sceneCoordinateMaps->end()) {
+        throw runtime_error(
+            "Frame has already been added to scene coords! This shouldn't "
+            "happen, assuming publishCamPose is only called once before "
+            "initializing any keyframes.");
+      }
+      sceneCoordinateMaps->insert(
+          make_pair(frame->incoming_id, scene_coord_map));
+      removeSceneCoordIfKeyframe.insert(frame->incoming_id);
+    }
   }
 
   void pushLiveFrame(FrameHessian* image) override {
@@ -439,6 +493,56 @@ DsoMapGenerator::DsoMapGenerator(const string& input_path) {
   datasetReader = unique_ptr<DsoDatasetReader>(
       new DefaultTumReader(source, calib, gamma_calib, vignette));
 }
+/*
+ * Create an instance using the default Tum reader, but geometric calibration
+ * is disabled and gamma is set to a default value.
+ */
+DsoMapGenerator::DsoMapGenerator(const string& image_path, const string& calib_path,
+                                 bool save_non_keyframes_for_testing) {
+  // NOTE: this is the default for cambridge
+  setting_desiredImmatureDensity = 1500;
+  setting_desiredPointDensity = 2000;
+  // setting this higher than 1 forces more frames to be keyframes. Still, many
+  // frames are skipped for a variety of reasons. The most common is probably no
+  // camera movement / ill-conditioned depth estimation.
+  setting_kfGlobalWeight = 1;
+  setting_makeAllKFs = false;
+  setting_minFrames = 5;
+  setting_maxFrames = 50;
+  setting_maxOptIterations = 6;
+  setting_minOptIterations = 1;
+  setting_realTimeMaxKF = true;
+
+  // In the cambridge set, many of the frames are washed out / have low dynamic
+  // range. So permit lower quality point selections.
+  // Also track more points accross wide rotations/
+  setting_minGradHistAdd = 7.0;
+  setting_maxPixSearch = 0.3;
+  setting_minPointsRemaining = 0.005;
+  settings_timestepsToRetainUnobservedPts = 500;
+  setting_trace_stepsize = 1.0;
+  setting_minTraceQuality = 3.0; // min threshold ratio of best energy on epipolar line to second best
+  setting_maxLogAffFacInWindow = 3.0;
+
+//  setting_coarseCutoffTH = 40;
+
+  saveNonKeyFramesForTesting = save_non_keyframes_for_testing;
+
+  setting_logStuff = false;
+
+  disableAllDisplay = !enable_viewer;
+
+  setting_debugout_runquiet = false;
+
+  setting_photometricCalibration = 0;
+  setting_affineOptModeA = 0;
+  setting_affineOptModeB = 0;
+
+  datasetReader = unique_ptr<DsoDatasetReader>(
+      new DefaultTumReader(image_path, calib_path, "", ""));
+
+  mode = 1;
+}
 
 /*
  * Create an instance using just a camera calibration. Geometric calibration
@@ -447,18 +551,25 @@ DsoMapGenerator::DsoMapGenerator(const string& input_path) {
  */
 DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, int width, int height,
                                  const vector<string>& image_paths,
-                                 const string& cache_path) {
+                                 const string& cache_path,
+                                 bool save_non_keyframes_for_testing) {
+  // NOTE: this is the default for 7scenes
   setting_desiredImmatureDensity = 3000;
   setting_desiredPointDensity = 4000;
   // setting this higher than 1 forces more frames to be keyframes. Still, many
   // frames are skipped for a variety of reasons. The most common is probably no
   // camera movement / ill-conditioned depth estimation.
-  setting_kfGlobalWeight = 2;
-  setting_minFrames = 10;
-  setting_maxFrames = 50;
-  setting_maxOptIterations = 10;
+  setting_kfGlobalWeight = 1;
+  setting_makeAllKFs = false;
+  setting_minFrames = 5;
+  setting_maxFrames = 20;
+  setting_maxOptIterations = 6;
   setting_minOptIterations = 1;
   setting_realTimeMaxKF = true;
+
+  settings_timestepsToRetainUnobservedPts = 500;
+
+  saveNonKeyFramesForTesting = save_non_keyframes_for_testing;
 
   setting_logStuff = false;
 
@@ -483,6 +594,8 @@ void DsoMapGenerator::runVisualOdometry() {
   for (int i = 0; i < datasetReader->getNumImages(); ++i) {
     idsToPlay.push_back(i);
   }
+
+//  std::reverse(idsToPlay.begin(), idsToPlay.end());
   runVisualOdometry(idsToPlay);
 }
 void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
@@ -490,6 +603,8 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
   fullSystem->setGammaFunction(datasetReader->getPhotometricGamma());
   unique_ptr<DsoOutputRecorder> dso_recorder(new DsoOutputRecorder());
   fullSystem->outputWrapper.push_back(dso_recorder.get());
+
+  dso_recorder->saveNonKeyFramesForTesting = saveNonKeyFramesForTesting;
 
   dso::IOWrap::PangolinDSOViewer* viewer = nullptr;
   if (enable_viewer) {

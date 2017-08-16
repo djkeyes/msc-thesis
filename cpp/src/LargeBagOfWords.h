@@ -30,16 +30,15 @@ public:
                                const Ptr<DescriptorMatcher>& dmatcher );
     virtual ~BOWSparseImgDescriptorExtractor();
 
-
     /*
-	 * Compute a bag of words descriptor, and return it as a collection of
-	 * nearest neighbor assignments. For a visual vocabulary of K words and
-	 * images with N descriptors, this is efficient when N << K.
-	 */
-	void computeAssignments(InputArray keypointDescriptors,
-			std::vector<int>& assignmentsOut);
+         * Compute a bag of words descriptor, and return it as a collection of
+         * nearest neighbor assignments. For a visual vocabulary of K words and
+         * images with N descriptors, this is efficient when N << K.
+         */
+    void computeAssignments(InputArray keypointDescriptors,
+                            std::vector<std::vector<int>>& assignmentsOut,
+                            int num_nearest_neighbors = 1);
 };
-
 }
 
 #endif /* SRC_LARGEBAGOFWORDS_H_ */
