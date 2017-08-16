@@ -10,6 +10,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -21,6 +22,7 @@
 #include "FullSystem/FullSystem.h"
 #include "FullSystem/ImmaturePoint.h"
 #include "IOWrapper/Output3DWrapper.h"
+#include "IOWrapper/Pangolin/PangolinDSOViewer.h"
 #include "boost/filesystem.hpp"
 #include "util/DatasetReader.h"
 #include "util/NumType.h"
@@ -33,6 +35,7 @@ using IOWrap::Output3DWrapper;
 namespace sdl {
 
 bool print_debug_info = false;
+bool enable_viewer = true;
 
 /*
  * Allows you to read from a TUM monoVO dataset using DSO's ImageFolderReader
@@ -400,7 +403,7 @@ DsoMapGenerator::DsoMapGenerator(int argc, char** argv) {
 
   setting_logStuff = false;
 
-  disableAllDisplay = true;
+  disableAllDisplay = !enable_viewer;
 
   string source, calib, gamma_calib, vignette;
   for (int i = 0; i < argc; i++) {
@@ -420,7 +423,7 @@ DsoMapGenerator::DsoMapGenerator(const string& input_path) {
 
   setting_logStuff = false;
 
-  disableAllDisplay = true;
+  disableAllDisplay = !enable_viewer;
 
   setting_debugout_runquiet = true;
 
@@ -459,7 +462,7 @@ DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, int width, int height,
 
   setting_logStuff = false;
 
-  disableAllDisplay = true;
+  disableAllDisplay = !enable_viewer;
 
   setting_debugout_runquiet = true;
 
@@ -487,6 +490,12 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
   fullSystem->setGammaFunction(datasetReader->getPhotometricGamma());
   unique_ptr<DsoOutputRecorder> dso_recorder(new DsoOutputRecorder());
   fullSystem->outputWrapper.push_back(dso_recorder.get());
+
+  dso::IOWrap::PangolinDSOViewer* viewer = nullptr;
+  if (enable_viewer) {
+    viewer = new dso::IOWrap::PangolinDSOViewer(dso::wG[0], dso::hG[0], true);
+    fullSystem->outputWrapper.push_back(viewer);
+  }
 
   clock_t started = clock();
 
@@ -533,6 +542,11 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
   clock_t ended = clock();
 
   fullSystem->printResult("result.txt");
+
+  if (enable_viewer) {
+    viewer->join();
+    delete viewer;
+  }
 
   int numFramesProcessed = ids_to_play.size();
   double MilliSecondsTakenSingle =

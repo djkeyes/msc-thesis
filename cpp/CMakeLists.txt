@@ -24,6 +24,7 @@ find_library(DSO_LIBRARY dso ${DSO_PATH}/build/lib)
 find_package(PCL REQUIRED COMPONENTS common io features)
 find_package(GeometricBurstiness CONFIG REQUIRED) # this exports GeometricBurstinessHeaders
 find_package(Caffe REQUIRED)
+find_package(Pangolin 0.2 QUIET)
 
 # fix unnecessary link required by libproj in ubuntu 16.04
 list(REMOVE_ITEM PCL_LIBRARIES "vtkproj4")
@@ -69,6 +70,7 @@ target_link_libraries(dso_pointcloud_generator
     boost_thread
     ${PCL_COMMON_LIBRARIES}
     ${PCL_IO_LIBRARIES}
+    ${Pangolin_LIBRARIES} 
 )
 
 add_executable(pfh_from_ply_test
@@ -98,6 +100,7 @@ target_link_libraries(main_run_semidense
     boost_program_options
     ${PCL_COMMON_LIBRARIES}
     ${PCL_IO_LIBRARIES}
+    ${Pangolin_LIBRARIES} 
 )
 
 
@@ -128,6 +131,7 @@ target_link_libraries(main_analyze_relocalization
     ${PCL_IO_LIBRARIES}
     GeometricBurstinessHeaders
     ${Caffe_LIBRARIES}
+    ${Pangolin_LIBRARIES} 
 )
 
 
@@ -152,6 +156,7 @@ target_link_libraries(create_descriptor_training_data
     ${PCL_COMMON_LIBRARIES}
     ${PCL_IO_LIBRARIES}
     GeometricBurstinessHeaders
+    ${Pangolin_LIBRARIES} 
 )
 
 add_executable(test_map_generation
@@ -174,6 +179,7 @@ target_link_libraries(test_map_generation
     ${PCL_COMMON_LIBRARIES}
     ${PCL_IO_LIBRARIES}
     GeometricBurstinessHeaders
+    ${Pangolin_LIBRARIES} 
 )
 add_test(TestMapGeneration test_map_generation /home/daniel/data/tum-for-testing/ /home/daniel/data/tmp/test/)
 
