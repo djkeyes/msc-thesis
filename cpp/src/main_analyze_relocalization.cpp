@@ -36,9 +36,9 @@ using namespace cv;
 namespace sdl {
 
 bool use_second_best_for_debugging = false;
-bool display_top_matching_images = false;
+bool display_top_matching_images = true;
 bool save_first_trajectory = true;
-bool display_stereo_correspondences = false;
+bool display_stereo_correspondences = true;
 bool use_5pt_for_verif = false;  // true: 5pt essential mat. false: 4pt PnP
 
 int vocabulary_size;
@@ -49,6 +49,8 @@ double ratio_threshold;
 bool use_caffe_descriptor;
 string caffe_prototxt;
 string caffe_caffemodel;
+
+bool seed_ground_truth_poses;
 
 unique_ptr<SceneParser> scene_parser;
 
@@ -73,10 +75,31 @@ class MatchingMethod {
   void updateResults(const Query& q, const Result& top_result, Mat inlier_mask,
                      Mat R, Mat t, const vector<Point2f>& query_pts,
                      const vector<Point2f>& database_pts) {
+
+    // should this threshold be a function of the ransac model DOF?
+    if (countNonZero(inlier_mask) >= 12) {
+      high_inlier_queries++;
+    }
+
+    if (countNonZero(inlier_mask) == 0) {
+      // Pose estimation failed. Just use the db's VO pose as a guess.
+      // If anyone wants to find failed poses later, they can check the inlier
+      // count.
+      int rt = R.type();
+      int tt = t.type();
+      dso::SE3 pose(top_result.frame.loadPose());
+      R.create(3, 3, CV_64F);
+      t.create(3, 1, CV_64F);
+      eigen2cv(pose.rotationMatrix(), R);
+      eigen2cv(pose.translation(), t);
+      R.convertTo(R, rt);
+      t.convertTo(t, tt);
+    }
+
     static int num_displayed = 0;
-    if (display_stereo_correspondences && num_displayed < 5 &&
+    if (display_stereo_correspondences && num_displayed < 20 &&
         q.getParentDatabaseId() !=
-            static_cast<unsigned int>(top_result.frame.dbId) && q.getFrame()->index > 700) {
+            static_cast<unsigned int>(top_result.frame.dbId) && q.getFrame()->index > 200) {
       Mat query = q.getFrame()->imageLoader();
       Mat result = top_result.frame.imageLoader();
       Mat stereo;
@@ -106,27 +129,24 @@ class MatchingMethod {
       waitKey(0);
       destroyWindow(window_name);
 
+      Mat db_R_gt, db_t_gt;
+      scene_parser->loadGroundTruthPose(top_result.frame, db_R_gt, db_t_gt);
+      Mat query_R_gt, query_t_gt;
+      scene_parser->loadGroundTruthPose(*q.getFrame(), query_R_gt, query_t_gt);
+
+      double translation_error = norm(query_t_gt, t);
+      // compute angle between rotation matrices
+      Mat rotation_diff = (query_R_gt * R.t());
+      // To measure difference, compute the angle when represented in axis-angle
+      float angle_error_rad =
+          acos((trace(rotation_diff)[0] - 1.0) /
+               2.0);
+      float angle_error_deg = (180. * angle_error_rad / M_PI);
+
+      cout << "Error (only valid if DB is aligned to GT): " << angle_error_deg
+           << " deg, " << translation_error << "m" << endl;
+
       ++num_displayed;
-    }
-
-    // should this threshold be a function of the ransac model DOF?
-    if (countNonZero(inlier_mask) >= 12) {
-      high_inlier_queries++;
-    }
-
-    if (countNonZero(inlier_mask) == 0) {
-      // Pose estimation failed. Just use the db's VO pose as a guess.
-      // If anyone wants to find failed poses later, they can check the inlier
-      // count.
-      int rt = R.type();
-      int tt = t.type();
-      dso::SE3 pose(top_result.frame.loadPose());
-      R.create(3, 3, CV_64F);
-      t.create(3, 1, CV_64F);
-      eigen2cv(pose.rotationMatrix(), R);
-      eigen2cv(pose.translation(), t);
-      R.convertTo(R, rt);
-      t.convertTo(t, tt);
     }
 
     Mat db_R_gt, db_t_gt;
@@ -450,7 +470,7 @@ class Match_2d_2d_5point : public MatchingMethod {
 };
 // Match 2D to 3D using image retrieval as a proxy for possible co-visibility,
 // and use depth values (from slam) to recover transformation
-class Match_2d_3d_dlt : public MatchingMethod {
+class Match_2d_3d_pnp : public MatchingMethod {
   bool needs3dDatabasePoints() override { return true; }
   bool needs3dQueryPoints() override { return false; }
 
@@ -542,7 +562,7 @@ void parseArguments(int argc, char** argv) {
           " to be considered accurate.")
       ("pose_estimation_method", po::value<string>()->default_value(""), "Robust estimation method to determine pose"
           " after image retrieval. Can be '5point_E' to decompose an essential matrix (and use the ground-truth scale),"
-          " 'DLT' to compute a direct linear transform (requires mapping_method to be specified), or left empty.")
+          " 'PNP' to compute a perspective-n-point solution (requires mapping_method to be specified), or left empty.")
       ("use_caffe_descriptor", po::value<bool>()->default_value(false), "Compute a dense descriptor using the provided"
           "caffe model in caffe_prototxt and caffe_caffemodel.")
       ("caffe_prototxt", po::value<string>(), "The prototxt to use to evaulate the descriptor.")
@@ -551,7 +571,9 @@ void parseArguments(int argc, char** argv) {
           "copied over.")
       ("matching_ratio_threshold", po::value<double>()->default_value(0.7), "Threshold for the ratio test. For each "
           "descriptor in a query image, a match is formed if the distance to the first nearest neighbor is less than "
-          "this fraction of the distance to the second nearest neighbor.");
+          "this fraction of the distance to the second nearest neighbor.")
+      ("seed_ground_truth_poses", po::value<bool>()->default_value(false), "To prevent drift, force the coarse tracker to "
+          "use ground truth poses as the initial guess for the motion model.");
 
   po::options_description commandline_args;
   commandline_args.add(commandline_exclusive).add(general_args);
@@ -602,8 +624,9 @@ void parseArguments(int argc, char** argv) {
   if (matching_method_str.length() == 0 ||
       matching_method_str.find("5point_E") == 0) {
     matching_method = unique_ptr<MatchingMethod>(new Match_2d_2d_5point());
-  } else if (matching_method_str.find("DLT") == 0) {
-    matching_method = unique_ptr<MatchingMethod>(new Match_2d_3d_dlt());
+  } else if (matching_method_str.find("PNP") == 0 || matching_method_str.find("DLT") == 0) {
+    // daniel: "DLT" is an incorrect name, but I don't want to change all my config files
+    matching_method = unique_ptr<MatchingMethod>(new Match_2d_3d_pnp());
   } else {
     throw runtime_error("Invalid value for pose_estimation_method!");
   }
@@ -644,6 +667,8 @@ void parseArguments(int argc, char** argv) {
     caffe_caffemodel = vm["caffe_caffemodel"].as<string>();
   }
 
+  seed_ground_truth_poses = vm["seed_ground_truth_poses"].as<bool>();
+
   ratio_threshold = vm["matching_ratio_threshold"].as<double>();
 }
 
@@ -656,7 +681,7 @@ int main(int argc, char** argv) {
   vector<pair<vector<reference_wrapper<sdl::Database>>, vector<sdl::Query>>>
       dbs_with_queries;
 
-  sdl::scene_parser->parseScene(dbs, dbs_with_queries);
+  sdl::scene_parser->parseScene(dbs, dbs_with_queries, sdl::seed_ground_truth_poses);
 
   Ptr<Feature2D> sift = xfeatures2d::SIFT::create(20000, 3, 0.005, 80);
 
@@ -777,7 +802,7 @@ int main(int argc, char** argv) {
 
           // check ratio test
           map<int, DMatch> best_match_per_trainidx(sdl::doRatioTest(
-              q_descriptors, db_descriptors, matcher, sdl::ratio_threshold));
+              q_descriptors, db_descriptors, matcher, sdl::ratio_threshold, sdl::use_caffe_descriptor));
           vector<Point2f> p1, p2;
           p1.reserve(best_match_per_trainidx.size());
           p2.reserve(best_match_per_trainidx.size());
@@ -841,7 +866,7 @@ int main(int argc, char** argv) {
       // own.
       // check ratio test
       map<int, DMatch> best_match_per_trainidx(sdl::doRatioTest(
-          q_descriptors, db_descriptors, matcher, sdl::ratio_threshold));
+          q_descriptors, db_descriptors, matcher, sdl::ratio_threshold, sdl::use_caffe_descriptor));
       vector<DMatch> matches;
       matches.reserve(best_match_per_trainidx.size());
       for (auto& element : best_match_per_trainidx) {
@@ -849,10 +874,10 @@ int main(int argc, char** argv) {
       }
 
       // display the result in a pretty window
-      if (num_displayed < 5 && sdl::display_top_matching_images &&
+      if (num_displayed < 20 && sdl::display_top_matching_images &&
           static_cast<unsigned int>(top_result.frame.dbId) !=
               query.getParentDatabaseId() &&
-          query.getFrame()->index > 700) {
+          query.getFrame()->index > 200) {
         num_displayed++;
         int width = 640, height = 640;
         int rows = 3, cols = 3;
@@ -880,6 +905,16 @@ int main(int argc, char** argv) {
               stringstream ss;
               ss << "query, db=" << query.getParentDatabaseId();
               text = ss.str();
+
+              // Draw all the possible places for matches
+              vector<KeyPoint> query_keypoints;
+              Mat query_descriptors;
+              query.getFrame()->loadDescriptors(query_keypoints,
+                                                query_descriptors);
+              for (auto& element : query_keypoints) {
+                // draw larger than 1 pixel, so it shows up after resizing
+                circle(image, element.pt, 3, Scalar(0, 0, 255), -1);
+              }
             } else {
               // load db match
               int index = cols * r + c - 1;
@@ -897,7 +932,7 @@ int main(int argc, char** argv) {
               // check ratio test
               map<int, DMatch> best_match_per_trainidx(
                   sdl::doRatioTest(q_descriptors, db_descriptors, matcher,
-                                   sdl::ratio_threshold));
+                                   sdl::ratio_threshold, sdl::use_caffe_descriptor));
               for (auto& element : best_match_per_trainidx) {
                 // draw larger than 1 pixel, so it shows up after resizing
                 circle(image, result_keypoints[element.second.trainIdx].pt, 3,

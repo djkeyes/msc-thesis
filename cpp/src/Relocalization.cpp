@@ -170,27 +170,22 @@ boost::filesystem::path Frame::getSceneCoordinateFilename() const {
   ss << "sparse_scene_coords_" << setfill('0') << setw(6) << index << ".bin";
   return cachePath / ss.str();
 }
-void Frame::saveSceneCoordinates(cv::SparseMat coordinate_map) const {
-  // Can't use imwrite/read, since that only works on cv::mat of type CV_8BC3
-
-  assert(coordinate_map.type() == CV_32FC3);
-
+void Frame::saveSceneCoordinates(const SceneCoordinateMap& coordinate_map) const {
   fs::path filename(getSceneCoordinateFilename().string());
   fs::create_directories(filename.parent_path());
 
   ofstream ofs(filename.string(), ios_base::out | ios_base::binary);
 
-  uint32_t rows = coordinate_map.size(0);
-  uint32_t cols = coordinate_map.size(1);
-  uint32_t size = coordinate_map.nzcount();
+  uint32_t rows = coordinate_map.height;
+  uint32_t cols = coordinate_map.width;
+  uint32_t size = coordinate_map.coords.size();
   ofs.write(reinterpret_cast<const char*>(&rows), sizeof(uint32_t));
   ofs.write(reinterpret_cast<const char*>(&cols), sizeof(uint32_t));
   ofs.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
-  for (auto iter = coordinate_map.begin(); iter != coordinate_map.end();
-       ++iter) {
-    cv::Vec3f& val = iter.value<cv::Vec3f>();
-    uint16_t row = iter.node()->idx[0];
-    uint16_t col = iter.node()->idx[1];
+  for (const auto& element : coordinate_map.coords) {
+    const cv::Vec3f& val = element.second;
+    uint16_t row = element.first.first;
+    uint16_t col = element.first.second;
     ofs.write(reinterpret_cast<const char*>(&row), sizeof(uint16_t));
     ofs.write(reinterpret_cast<const char*>(&col), sizeof(uint16_t));
     ofs.write(reinterpret_cast<const char*>(&val), sizeof(cv::Vec3f));
@@ -444,28 +439,57 @@ void Database::setBowExtractor(
   bowExtractor = bow_extractor;
 }
 
+void Database::onlyDoMapping() {
+  if (gtPoseLoader) {
+    // if provided, use the ground truth pose to seed DSO
+    mapGen->runVisualOdometry([this](int id) {
+      if (frames->find(id) == frames->end()) {
+        cout << "couldn't find frame id " << id << endl;
+        assert(false);
+        return unique_ptr<SE3>(nullptr);
+      } else {
+        cv::Mat R, t;
+        if (gtPoseLoader(*frames->at(id), R, t)) {
+          R.convertTo(R, CV_64F);
+          t.convertTo(t, CV_64F);
+          Eigen::Matrix3d R_eigen;
+          Eigen::Vector3d t_eigen;
+          cv2eigen(R, R_eigen);
+          cv2eigen(t, t_eigen);
+          SE3 pose(R_eigen, t_eigen);
+
+          return unique_ptr<SE3>(new SE3(pose));
+        } else {
+          return unique_ptr<SE3>(nullptr);
+        }
+      }
+    });
+  } else {
+    // just run vanilla DSO, hopefully no drift
+    mapGen->runVisualOdometry();
+  }
+}
 void Database::doMapping() {
   if (!needToRecomputeSceneCoordinates()) {
     return;
   }
   // first run the full mapping algorithm
-  mapGen->runVisualOdometry();
+  onlyDoMapping();
 
   // then fetch the depth maps / poses, and convert them to 2D -> 3D image maps
-  map<int, cv::SparseMat> scene_coordinate_maps =
+  map<int, SceneCoordinateMap> scene_coordinate_maps =
       mapGen->getSceneCoordinateMaps();
   std::map<int, dso::SE3>* poses = mapGen->getPoses();
 
-  const int* dims = scene_coordinate_maps.begin()->second.size();
+  int width = scene_coordinate_maps.begin()->second.width;
+  int height = scene_coordinate_maps.begin()->second.height;
   for (auto& element : *frames) {
     Frame& cur_frame = *element.second;
     int frame_id = element.first;
 
     auto iter = scene_coordinate_maps.find(frame_id);
     if (iter == scene_coordinate_maps.end()) {
-      cv::SparseMat empty;
-      empty.create(2, dims, CV_32FC3);
-      cur_frame.saveSceneCoordinates(empty);
+      cur_frame.saveSceneCoordinates(SceneCoordinateMap(height, width));
     } else {
       cur_frame.saveSceneCoordinates(iter->second);
     }
@@ -1298,7 +1322,7 @@ const vector<KeyPoint>& Query::getKeypoints() const { return keypoints; }
 
 map<int, DMatch> doRatioTest(Mat query_descriptors, Mat db_descriptors,
                              Ptr<DescriptorMatcher> matcher,
-                             double ratio_threshold) {
+                             double ratio_threshold, bool use_distance_threshold) {
   map<int, DMatch> best_match_per_trainidx;
 
   vector<vector<DMatch>> first_two_nns;
@@ -1312,7 +1336,11 @@ map<int, DMatch> doRatioTest(Mat query_descriptors, Mat db_descriptors,
       // would require more bookkeeping
       if (iter == best_match_per_trainidx.end() ||
           iter->second.distance > nn_matches[0].distance) {
-        best_match_per_trainidx[nn_matches[0].trainIdx] = nn_matches[0];
+        // for the caffe descriptor, the margin for the hinge loss is set to
+        // 0.5. This makes a natural metric for detecting outliers.
+//        if (!use_distance_threshold || nn_matches[0].distance < 128.0) {
+          best_match_per_trainidx[nn_matches[0].trainIdx] = nn_matches[0];
+//        }
       }
     }
   }

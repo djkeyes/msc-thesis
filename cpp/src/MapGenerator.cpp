@@ -153,7 +153,8 @@ struct DsoOutputRecorder : public Output3DWrapper {
   unique_ptr<map<int, unique_ptr<MinimalImageF>>> depthImagesById;
   unique_ptr<map<int, unique_ptr<MinimalImageF>>> rgbImagesById;
   unique_ptr<map<int, SE3>> posesById;
-  unique_ptr<map<int, cv::SparseMat>> sceneCoordinateMaps;
+
+  unique_ptr<map<int, SceneCoordinateMap>> sceneCoordinateMaps;
   const map<uint64_t, Eigen::Vector2i, less<uint64_t>,
             Eigen::aligned_allocator<pair<uint64_t, Eigen::Vector2i>>>*
       latestConnectivity;
@@ -163,9 +164,9 @@ struct DsoOutputRecorder : public Output3DWrapper {
   bool saveNonKeyFramesForTesting;
   set<int> removeSceneCoordIfKeyframe;
 
-  const double my_scaledTH = 1;      // 1e10;
-  const double my_absTH = 1;         // 1e10;
-  const double my_minRelBS = 0.005;  // 0;
+  const double my_scaledTH = 100;      // 1e10;
+  const double my_absTH = 100;         // 1e10;
+  const double my_minRelBS = 0.0005;  // 0;
 
   DsoOutputRecorder()
       : coloredPoints(new list<ColoredPoint>()),
@@ -174,7 +175,7 @@ struct DsoOutputRecorder : public Output3DWrapper {
         depthImagesById(new map<int, unique_ptr<MinimalImageF>>()),
         rgbImagesById(new map<int, unique_ptr<MinimalImageF>>()),
         posesById(new map<int, SE3>()),
-        sceneCoordinateMaps(new map<int, cv::SparseMat>()),
+        sceneCoordinateMaps(new map<int, SceneCoordinateMap>()),
         latestConnectivity(nullptr),
         frameIdToIncomingId(new map<int, int>()),
         covisibleMarginalizedPoints(new map<int, list<Vec3>>()),
@@ -238,13 +239,12 @@ struct DsoOutputRecorder : public Output3DWrapper {
     }
     auto scene_points_iter = sceneCoordinateMaps->find(frame_id);
     if (scene_points_iter == sceneCoordinateMaps->end()) {
-      int dims[] = {hG[0], wG[0]};
       scene_points_iter =
           sceneCoordinateMaps
-              ->insert(make_pair(frame_id, cv::SparseMat(2, dims, CV_32FC3)))
+              ->insert(make_pair(frame_id, SceneCoordinateMap(hG[0], wG[0])))
               .first;
     }
-    cv::SparseMat sceneCoordMap = scene_points_iter->second;
+    SceneCoordinateMap& sceneCoordMap = scene_points_iter->second;
 
     for (PointHessian* point : points) {
       double z = 1.0 / point->idepth;
@@ -295,9 +295,9 @@ struct DsoOutputRecorder : public Output3DWrapper {
         coloredPoints->push_back(make_pair(point3_world, color));
         current_points->push_back(make_pair(point3_cam, color));
 
-        sceneCoordMap.ref<cv::Vec3f>(static_cast<int>(point->v),
-                                     static_cast<int>(point->u)) =
-            cv::Vec3f(point3_world.x(), point3_world.y(), point3_world.z());
+        sceneCoordMap.coords.insert(make_pair(
+            make_pair(static_cast<int>(point->v), static_cast<int>(point->u)),
+            cv::Vec3f(point3_world.x(), point3_world.y(), point3_world.z())));
 
         // also project into frames with known covisibility
         for (PointFrameResidual* residual : point->residuals) {
@@ -380,8 +380,7 @@ struct DsoOutputRecorder : public Output3DWrapper {
 
       selector.makeMaps(fh, &map_out[0], setting_desiredImmatureDensity);
 
-      int dims[] = {hG[0], wG[0]};
-      cv::SparseMat scene_coord_map(2, dims, CV_32FC3);
+      SceneCoordinateMap scene_coord_map(hG[0], wG[0]);
       for (int y = patternPadding + 1; y < hG[0] - patternPadding - 2; y++) {
         for (int x = patternPadding + 1; x < wG[0] - patternPadding - 2; x++) {
           int i = x + y * wG[0];
@@ -391,7 +390,8 @@ struct DsoOutputRecorder : public Output3DWrapper {
           // the difference doesn't really matter for us.
 
           float nan = numeric_limits<float>::quiet_NaN();
-          scene_coord_map.ref<cv::Vec3f>(y, x) = cv::Vec3f(nan, nan, nan);
+          scene_coord_map.coords.insert(
+              make_pair(make_pair(y, x), cv::Vec3f(nan, nan, nan)));
         }
       }
 
@@ -423,7 +423,7 @@ struct DsoOutputRecorder : public Output3DWrapper {
   }
 
   void join() override {
-    // printf("join() called!\n");
+     printf("join() called!\n");
   }
 
   void reset() override {
@@ -500,16 +500,16 @@ DsoMapGenerator::DsoMapGenerator(const string& input_path) {
 DsoMapGenerator::DsoMapGenerator(const string& image_path, const string& calib_path,
                                  bool save_non_keyframes_for_testing) {
   // NOTE: this is the default for cambridge
-  setting_desiredImmatureDensity = 1500;
-  setting_desiredPointDensity = 2000;
+  setting_desiredImmatureDensity = 5000;
+  setting_desiredPointDensity = 4000;
   // setting this higher than 1 forces more frames to be keyframes. Still, many
   // frames are skipped for a variety of reasons. The most common is probably no
   // camera movement / ill-conditioned depth estimation.
   setting_kfGlobalWeight = 1;
   setting_makeAllKFs = false;
   setting_minFrames = 5;
-  setting_maxFrames = 50;
-  setting_maxOptIterations = 6;
+  setting_maxFrames = 30;
+  setting_maxOptIterations = 10;
   setting_minOptIterations = 1;
   setting_realTimeMaxKF = true;
 
@@ -517,10 +517,10 @@ DsoMapGenerator::DsoMapGenerator(const string& image_path, const string& calib_p
   // range. So permit lower quality point selections.
   // Also track more points accross wide rotations/
   setting_minGradHistAdd = 7.0;
-  setting_maxPixSearch = 0.3;
-  setting_minPointsRemaining = 0.005;
-  settings_timestepsToRetainUnobservedPts = 500;
-  setting_trace_stepsize = 1.0;
+  setting_maxPixSearch = 0.2;
+  setting_minPointsRemaining = 0.001;
+  settings_timestepsToRetainUnobservedPts = 50;
+  setting_trace_stepsize = 2.0;
   setting_minTraceQuality = 3.0; // min threshold ratio of best energy on epipolar line to second best
   setting_maxLogAffFacInWindow = 3.0;
 
@@ -528,11 +528,11 @@ DsoMapGenerator::DsoMapGenerator(const string& image_path, const string& calib_p
 
   saveNonKeyFramesForTesting = save_non_keyframes_for_testing;
 
-  setting_logStuff = false;
+  setting_logStuff = true;
 
   disableAllDisplay = !enable_viewer;
 
-  setting_debugout_runquiet = false;
+  setting_debugout_runquiet = true;
 
   setting_photometricCalibration = 0;
   setting_affineOptModeA = 0;
@@ -554,7 +554,7 @@ DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, int width, int height,
                                  const string& cache_path,
                                  bool save_non_keyframes_for_testing) {
   // NOTE: this is the default for 7scenes
-  setting_desiredImmatureDensity = 3000;
+  setting_desiredImmatureDensity = 5000;
   setting_desiredPointDensity = 4000;
   // setting this higher than 1 forces more frames to be keyframes. Still, many
   // frames are skipped for a variety of reasons. The most common is probably no
@@ -567,7 +567,7 @@ DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, int width, int height,
   setting_minOptIterations = 1;
   setting_realTimeMaxKF = true;
 
-  settings_timestepsToRetainUnobservedPts = 500;
+  settings_timestepsToRetainUnobservedPts = 100;
 
   saveNonKeyFramesForTesting = save_non_keyframes_for_testing;
 
@@ -575,7 +575,7 @@ DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, int width, int height,
 
   disableAllDisplay = !enable_viewer;
 
-  setting_debugout_runquiet = true;
+  setting_debugout_runquiet = false;
 
   // to handle datasets other than tum monoVO, we'll need to change these
   // paths, and change the mode and photometric calibration weights
@@ -590,22 +590,29 @@ DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, int width, int height,
 }
 
 void DsoMapGenerator::runVisualOdometry() {
+  runVisualOdometry(0);
+}
+
+void DsoMapGenerator::runVisualOdometry(
+    function<unique_ptr<SE3>(int)> pose_loader) {
   vector<int> idsToPlay;
   for (int i = 0; i < datasetReader->getNumImages(); ++i) {
     idsToPlay.push_back(i);
   }
 
-//  std::reverse(idsToPlay.begin(), idsToPlay.end());
-  runVisualOdometry(idsToPlay);
+  //  std::reverse(idsToPlay.begin(), idsToPlay.end());
+  runVisualOdometry(idsToPlay, pose_loader);
 }
-void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
+
+void DsoMapGenerator::runVisualOdometry(
+    const vector<int>& ids_to_play,
+    function<unique_ptr<SE3>(int)> pose_loader) {
   unique_ptr<FullSystem> fullSystem(new FullSystem());
   fullSystem->setGammaFunction(datasetReader->getPhotometricGamma());
   unique_ptr<DsoOutputRecorder> dso_recorder(new DsoOutputRecorder());
   fullSystem->outputWrapper.push_back(dso_recorder.get());
 
   dso_recorder->saveNonKeyFramesForTesting = saveNonKeyFramesForTesting;
-
   dso::IOWrap::PangolinDSOViewer* viewer = nullptr;
   if (enable_viewer) {
     viewer = new dso::IOWrap::PangolinDSOViewer(dso::wG[0], dso::hG[0], true);
@@ -614,6 +621,7 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
 
   clock_t started = clock();
 
+//  int num_since_gt = 0;
   for (int i = 0; i < static_cast<int>(ids_to_play.size()); i++) {
     // if not initialized: reset start time.
     if (!fullSystem->initialized) {
@@ -624,7 +632,18 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
 
     ImageAndExposure* img = datasetReader->getImage(id);
 
-    fullSystem->addActiveFrame(img, id);
+    if (pose_loader) {
+      unique_ptr<SE3> pose(pose_loader(id));
+      if (!pose/* && num_since_gt != 8*/) {
+//        num_since_gt++;
+        delete img;
+        continue;
+      }
+      fullSystem->addActiveFrame(img, id, move(pose));
+//      num_since_gt = 0;
+    } else {
+      fullSystem->addActiveFrame(img, id);
+    }
 
     delete img;
 
@@ -657,11 +676,6 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
   clock_t ended = clock();
 
   fullSystem->printResult("result.txt");
-
-  if (enable_viewer) {
-    viewer->join();
-    delete viewer;
-  }
 
   int numFramesProcessed = ids_to_play.size();
   double MilliSecondsTakenSingle =
@@ -736,7 +750,7 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
     auto pose_iter = poses->find(iter->first);
     if (scene_coord_iter != sceneCoordinateMaps->end() &&
         pose_iter != poses->end()) {
-      cv::SparseMat& scene_coords = scene_coord_iter->second;
+      SceneCoordinateMap& scene_coords = scene_coord_iter->second;
       SE3 world_to_cam = pose_iter->second.inverse();
 
       for (Vec3& point : iter->second) {
@@ -748,14 +762,15 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
         int u = static_cast<int>(round(local.x() / local.z() * fx + cx));
         int v = static_cast<int>(round(local.y() / local.z() * fy + cy));
 
-        if (u < 0 || v < 0 || u >= scene_coords.size(1) ||
-            v >= scene_coords.size(0) || local.z() <= 0) {
+        if (u < 0 || v < 0 || u >= scene_coords.width ||
+            v >= scene_coords.height || local.z() <= 0) {
           continue;
         }
 
-        if (scene_coords.find<cv::Vec3f>(v, u) == nullptr) {
-          scene_coords.ref<cv::Vec3f>(v, u) =
-              cv::Vec3f(point.x(), point.y(), point.z());
+        if (scene_coords.coords.find(make_pair(v, u)) ==
+            scene_coords.coords.end()) {
+          scene_coords.coords.insert(make_pair(
+              make_pair(v, u), cv::Vec3f(point.x(), point.y(), point.z())));
         }
       }
     }
@@ -767,6 +782,10 @@ void DsoMapGenerator::runVisualOdometry(const vector<int>& ids_to_play) {
 
   for (IOWrap::Output3DWrapper* ow : fullSystem->outputWrapper) {
     ow->join();
+  }
+
+  if (enable_viewer) {
+    delete viewer;
   }
 }
 
@@ -1080,7 +1099,7 @@ void DsoMapGenerator::parseArgument(char* arg, string& source, string& calib,
 
 int DsoMapGenerator::getNumImages() { return datasetReader->getNumImages(); }
 
-map<int, cv::SparseMat> DsoMapGenerator::getSceneCoordinateMaps() {
+map<int, SceneCoordinateMap> DsoMapGenerator::getSceneCoordinateMaps() {
   // returns a copy
   return *sceneCoordinateMaps;
 }

@@ -64,15 +64,66 @@ set<string> CambridgeLandmarksParser::accumulateSubdirsFromFile(
   return result;
 }
 
+int id_from_filename_and_dir(const string& name, const string& dir,
+                             bool is_street) {
+  if (!is_street) {
+    // these files are in the format frameXXXXX.jpg, but 1-indexed, so
+    // subtract 1.
+    return stoi(name.substr(5, 5)) - 1;
+  }
+
+  if (dir == "img") {
+    string prefix("image");
+    int video = stoi(name.substr(prefix.length(), 1));
+    int id = stoi(name.substr(prefix.length() + 2, 6)) - 1;
+    if (video == 2) {
+      // this many images start with 'image1_', then the counter restarts
+      id += 436;
+    }
+    return id;
+  } else if (dir == "img_north") {
+    string prefix("image_north_");
+    int video = stoi(name.substr(prefix.length(), 1));
+    int id = stoi(name.substr(prefix.length() + 2, 4)) - 1;
+    if (video == 2) {
+      // this many images start with 'image_north_1_', then the counter restarts
+      id += 622;
+    }
+    return id;
+  } else if (dir == "img_east") {
+    string prefix("image_east_");
+    int id = stoi(name.substr(prefix.length(), 4)) - 1;
+    return id;
+  } else if (dir == "img_south") {
+    // there's no image_south_2_. go figure.
+    string prefix("image_south_1_");
+    int id = stoi(name.substr(prefix.length(), 4)) - 1;
+    return id;
+  } else if (dir == "img_west") {
+    string prefix("image_west_");
+    int id = stoi(name.substr(prefix.length(), 4)) - 1;
+    return id;
+  } else {
+    stringstream ss;
+    ss << "Unexpected sequence name in Street scene: " << dir;
+    throw runtime_error(ss.str());
+  }
+}
+
 void CambridgeLandmarksParser::parseScene(
     vector<Database>& dbs,
     vector<pair<vector<reference_wrapper<Database>>, vector<Query>>>&
-        dbs_with_queries) {
+        dbs_with_queries,
+    bool inject_ground_truth) {
   // The names in this dataset sometimes follow weird patterns, so load the
   // train and test lists, which give correct directory names
 
   string test_filename((directory / "dataset_test.txt").string());
   string train_filename((directory / "dataset_train.txt").string());
+
+  // street violates all the naming conventions. come on, guys.
+  bool is_street =
+      (directory.filename().string().find("Street") != string::npos);
 
   set<string> test_subdirs(accumulateSubdirsFromFile(test_filename));
   set<string> train_subdirs(accumulateSubdirsFromFile(train_filename));
@@ -114,6 +165,7 @@ void CambridgeLandmarksParser::parseScene(
   for (unsigned int seq_idx = 0; seq_idx < all_subdirs.size(); ++seq_idx) {
     const fs::path& sequence_dir = directory / all_subdirs[seq_idx];
     Database& cur_db = dbs[seq_idx];
+    dbsByName.emplace(all_subdirs[seq_idx], dbs[seq_idx]);
 
     bool in_train_set =
         (train_subdirs.find(all_subdirs[seq_idx]) != train_subdirs.end());
@@ -126,17 +178,30 @@ void CambridgeLandmarksParser::parseScene(
       dbs_with_queries.back().first.push_back(cur_db);
     }
 
+    shared_ptr<ImageFolderReader> reader(new ImageFolderReader(
+        sequence_dir.string(), (directory / "colmap-calib.txt").string(), "",
+        ""));
+
     vector<string> sorted_images;
     for (auto file : fs::recursive_directory_iterator(sequence_dir)) {
       string name(file.path().filename().string());
       // note: resampled ends in jpg. originals are png.
-      if (name.find(".jpg") == string::npos) {
+      if (name.find(".jpg") == string::npos &&
+          name.find(".png") == string::npos) {
         continue;
       }
-      // these files are in the format frameXXXXX.jpg
-      int id = stoi(name.substr(5, 5));
+
+      int id = id_from_filename_and_dir(name, all_subdirs[seq_idx], is_street);
       unique_ptr<Frame> frame(new sdl::Frame(id, cur_db.db_id));
-      frame->setImageLoader([file]() { return imread(file.path().string()); });
+      frame->setImageLoader([reader, id]() {
+        ImageAndExposure* image = reader->getImage(id);
+        Mat shallow(image->h, image->w, CV_32FC1, image->image);
+        Mat converted;
+        shallow.convertTo(converted, CV_8UC1);
+        cvtColor(converted, converted, ColorConversionCodes::COLOR_GRAY2RGB);
+        delete image;
+        return converted;
+      });
       frame->setPath(sequence_dir);
       string image_filename(file.path().string());
       frame->setCachePath(cache / sequence_dir.filename());
@@ -156,37 +221,118 @@ void CambridgeLandmarksParser::parseScene(
     cur_db.setMapper(new DsoMapGenerator(
         sequence_dir.string(), (directory / "colmap-calib.txt").string(),
         !in_train_set));
+    if (inject_ground_truth) {
+      cur_db.setGtPoseLoader([this](const Frame& frame, Mat& R, Mat& t) {
+        return loadGroundTruthPose(frame, R, t);
+      });
+    }
   }
+
+  // preload the ground truth poses, so we don't have to seek every time
+  // file is directory/groundtruthSync.txt
+  fs::path test_pose_path = directory / "dataset_test.txt";
+  fs::path train_pose_path = directory / "dataset_train.txt";
+  loadGtPosesFromFile(test_pose_path, is_street);
+  loadGtPosesFromFile(train_pose_path, is_street);
 }
 
-void CambridgeLandmarksParser::loadGroundTruthPose(const sdl::Frame& frame,
-                                            Mat& rotation, Mat& translation) {
-  cout << "NEED TO IMPLEMENT LOADING GROUND TURTH FOR CAMBRIDGE" << endl;
-  assert(false);
-  // frame i in db j -> seq-(j+1)/frame-XXXXXi.pose.txt
-  stringstream ss;
-  ss << "frame-" << setfill('0') << setw(6) << frame.index << ".pose.txt";
-  fs::path pose_path = frame.framePath / ss.str();
+void CambridgeLandmarksParser::loadGtPosesFromFile(fs::path pose_path,
+                                                   bool is_street) {
+  ifstream pose_file(pose_path.string());
 
-  ifstream ifs(pose_path.string());
-  rotation.create(3, 3, CV_32FC1);
-  translation.create(3, 1, CV_32FC1);
-  // pose is stored as a 4x4 float matrix [R t; 0 1], so we only care about
-  // the first 3 rows.
-  for (int i = 0; i < 3; i++) {
-    ifs >> rotation.at<float>(i, 0);
-    ifs >> rotation.at<float>(i, 1);
-    ifs >> rotation.at<float>(i, 2);
-    ifs >> translation.at<float>(i, 0);
+  // first 3 lines are garbage
+  string line;
+  getline(pose_file, line);
+  getline(pose_file, line);
+  getline(pose_file, line);
+
+  while (getline(pose_file, line)) {
+    // TODO: will need to handle re-extracted content as a special case, since
+    // some files will not have the same names as the original dataset.
+
+    // seqY/frameXXXXX.png -> frame XXXXX-1 in dbsByName[seqY]
+    // (or possible (XXXXX-1) * r for some arbitrary sampling rate
+
+    // note: unlike tum, qw is first and not last
+    // seq/filename x y z qw qx qy qz
+    stringstream ss(line);
+    string filename;
+    float x, y, z, qw, qx, qy, qz;
+    ss >> filename;
+    read_float_or_nan_or_inf(ss, x);
+    read_float_or_nan_or_inf(ss, y);
+    read_float_or_nan_or_inf(ss, z);
+    read_float_or_nan_or_inf(ss, qw);
+    read_float_or_nan_or_inf(ss, qx);
+    read_float_or_nan_or_inf(ss, qy);
+    read_float_or_nan_or_inf(ss, qz);
+
+    string seqdir(filename.substr(0, filename.find("/")));
+
+    if (dbsByName.find(seqdir) == dbsByName.end()) {
+      // we might only be processing a subset. that's fine.
+      continue;
+    }
+    Database& cur_db = dbsByName.at(seqdir);
+    int index = id_from_filename_and_dir(
+        filename.substr(filename.find("/") + 1), seqdir, is_street);
+    // IGNORE THE FOLLOWING LINE. THE ORIGINAL DATASET IS VERY UN-UNIFOMLY
+    // SAMPLED.
+    // FOR EXAMPLE, IN VIDEO 1, THE VIDEO FRAMES CORRESPOND TO THE LABELED
+    // FRAMES
+    // IN THE FOLLOWING WAY
+    // 1 <--> 1
+    // 2 <--> 2
+    // 3 <--> 3
+    // 9 <--> 4
+    // 23 <--> 5
+    // 38 <--> 6
+    // SO 1/14 IS A VERY ROUGH APPROXIMATION, BUT IT'S NOT UNIFORM
+    // for the most part, it seems like the original dataset took every 14th
+    // frame. But some runs have fewer frames, so it's possible that they used
+    // a non-integer sampling rate (and rounded to the nearest frame), or that
+    // they dropped some frames.
+
+    // OpenCV doesn't directly support quaternion conversions AFAIK
+    Eigen::Quaternionf orientation(qw, qx, qy, qz);
+    Eigen::Matrix3f as_rot = orientation.toRotationMatrix();
+    Eigen::Vector3f translation(x, y, z);
+
+    Mat R, t;
+    eigen2cv(as_rot, R);
+    eigen2cv(translation, t);
+
+    // convert to 1/100th scale. DSO seems to be tuned for smaller scale
+    // environments.
+    t /= 100.0;
+
+    // for some reason, the quaternion (but not the translation) seems to be
+    // inverted? not sure what's up.
+    R = R.t();
+
+    rotationsAndTranslationsByDatabaseAndFrame[cur_db.db_id][index] =
+        make_tuple(R, t);
   }
-
-  ifs.close();
+  pose_file.close();
+}
+bool CambridgeLandmarksParser::loadGroundTruthPose(const sdl::Frame& frame,
+                                                   Mat& rotation,
+                                                   Mat& translation) {
+  auto& rotsAndTrans =
+      rotationsAndTranslationsByDatabaseAndFrame.at(frame.dbId);
+  if (rotsAndTrans.find(frame.index) == rotsAndTrans.end()) {
+    return false;
+  }
+  rotation = get<0>(rotsAndTrans.at(frame.index));
+  translation = get<1>(rotsAndTrans.at(frame.index));
+  return true;
 }
 
 void SevenScenesParser::parseScene(
     vector<Database>& dbs,
     vector<pair<vector<reference_wrapper<Database>>, vector<Query>>>&
-        dbs_with_queries) {
+        dbs_with_queries,
+    bool inject_ground_truth) {
   vector<fs::path> sequences;
   for (auto dir : fs::recursive_directory_iterator(directory)) {
     if (!fs::is_directory(dir)) {
@@ -265,9 +411,9 @@ void SevenScenesParser::parseScene(
       }
       // these files are in the format frame-XXXXXX.color.png
       int id = stoi(name.substr(6, 6));
-//      if (id < 50) {
-//        continue;
-//      }
+      //      if (id < 50) {
+      //        continue;
+      //      }
       unique_ptr<Frame> frame(new sdl::Frame(id, cur_db.db_id));
       frame->setImageLoader([file]() { return imread(file.path().string()); });
       frame->setPath(sequence_dir);
@@ -300,12 +446,18 @@ void SevenScenesParser::parseScene(
     cur_db.setMapper(new DsoMapGenerator(K, width, height, sorted_images,
                                          cur_db.getCachePath().string(),
                                          !in_train_set));
+
+    if (inject_ground_truth) {
+      cur_db.setGtPoseLoader([this](const Frame& frame, Mat& R, Mat& t) {
+        return loadGroundTruthPose(frame, R, t);
+      });
+    }
   }
 }
 
-void SevenScenesParser::loadGroundTruthPose(const sdl::Frame& frame,
+bool SevenScenesParser::loadGroundTruthPose(const sdl::Frame& frame,
                                             Mat& rotation, Mat& translation) {
-  // frame i in db j -> seq-(j+1)/frame-XXXXXi.pose.txt
+  // frame i -> frame-XXXXXi.pose.txt
   stringstream ss;
   ss << "frame-" << setfill('0') << setw(6) << frame.index << ".pose.txt";
   fs::path pose_path = frame.framePath / ss.str();
@@ -323,12 +475,23 @@ void SevenScenesParser::loadGroundTruthPose(const sdl::Frame& frame,
   }
 
   ifs.close();
+  return true;
+}
+bool SevenScenesParser::loadGroundTruthDepth(const sdl::Frame& frame,
+                                             cv::Mat& depth) {
+  // frame i -> frame-XXXXXi.depth.png
+  stringstream ss;
+  ss << "frame-" << setfill('0') << setw(6) << frame.index << ".depth.png";
+  depth = cv::imread((frame.framePath / ss.str()).string());
+
+  return true;
 }
 
 void TumParser::parseScene(
     vector<Database>& dbs,
     vector<pair<vector<reference_wrapper<Database>>, vector<Query>>>&
-        dbs_with_queries) {
+        dbs_with_queries,
+    bool inject_ground_truth) {
   vector<fs::path> sequences;
   for (auto dir : fs::recursive_directory_iterator(directory)) {
     if (!fs::is_directory(dir)) {
@@ -392,6 +555,11 @@ void TumParser::parseScene(
     }
 
     cur_db.setMapper(new DsoMapGenerator(sequence_dir.string()));
+    if (inject_ground_truth) {
+      cur_db.setGtPoseLoader([this](const Frame& frame, Mat& R, Mat& t) {
+        return loadGroundTruthPose(frame, R, t);
+      });
+    }
     // preload the ground truth poses, so we don't have to seek every time
     // file is sequence_dir/groundtruthSync.txt
     fs::path pose_path = sequence_dir / "groundtruthSync.txt";
@@ -432,7 +600,7 @@ void TumParser::parseScene(
   }
 }
 
-void TumParser::loadGroundTruthPose(const sdl::Frame& frame, Mat& rotation,
+bool TumParser::loadGroundTruthPose(const sdl::Frame& frame, Mat& rotation,
                                     Mat& translation) {
   // for the TUM dataset, initial and final ground truth is available (I
   // assume during this time, the camera is tracked by an multi-view IR
@@ -447,6 +615,7 @@ void TumParser::loadGroundTruthPose(const sdl::Frame& frame, Mat& rotation,
                         .at(frame.index));
   translation = get<1>(rotationsAndTranslationsByDatabaseAndFrame.at(frame.dbId)
                            .at(frame.index));
+  return true;
 }
 
 }  // namespace sdl

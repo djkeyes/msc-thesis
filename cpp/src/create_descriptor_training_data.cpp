@@ -23,6 +23,9 @@ void usage(char** argv, const po::options_description commandline_args) {
   cout << commandline_args << "\n";
 }
 
+bool seed_ground_truth_poses;
+bool save_ground_truth_depth;
+
 sdl::SceneParser* parseArguments(int argc, char** argv) {
   // Arguments, can be specified on commandline or in a file settings.config
   po::options_description commandline_exclusive(
@@ -38,7 +41,11 @@ sdl::SceneParser* parseArguments(int argc, char** argv) {
       ("datadir", po::value<string>()->default_value(""), "Directory of the scene dataset. For datasets composed"
           " of several scenes, this should be the appropriate subdirectory.")
       ("cache", po::value<string>()->default_value(""), "Directory to cache intermediate results, ie"
-          " descriptors or visual vocabulary, between runs.");
+          " descriptors or visual vocabulary, between runs.")
+      ("seed_ground_truth_poses", po::value<bool>()->default_value(false), "To prevent drift, force the coarse tracker to "
+          "use ground truth poses as the initial guess for the motion model.")
+      ("save_ground_truth_depth", po::value<bool>()->default_value(false), "Use the ground truth depth data instead of the"
+          "data from DSO, as a sanity check.");
 
   po::options_description commandline_args;
   commandline_args.add(commandline_exclusive).add(general_args);
@@ -82,6 +89,9 @@ sdl::SceneParser* parseArguments(int argc, char** argv) {
 
   fs::path cache_dir = fs::path(vm["cache"].as<string>());
 
+  seed_ground_truth_poses = vm["seed_ground_truth_poses"].as<bool>();
+  save_ground_truth_depth = vm["save_ground_truth_depth"].as<bool>();
+
   if (vm.count("scene")) {
     string scene_type(vm["scene"].as<string>());
     // currently only one supported scene
@@ -122,7 +132,7 @@ int main(int argc, char** argv) {
 
   // This loads both databases and queries (ie to do end-to-end experiments),
   // but we're only interested in the frames stored in the database
-  scene_parser->parseScene(dbs, dbs_with_queries);
+  scene_parser->parseScene(dbs, dbs_with_queries, seed_ground_truth_poses);
 
   for (int i = dbs.size() - 1; i >= 0; --i) {
     auto& db = dbs[i];
@@ -135,28 +145,39 @@ int main(int argc, char** argv) {
 
 
     // first run the full mapping algorithm
-    map_gen->runVisualOdometry();
+    // (this changes the state of map_gen)
+    // TODO: define the state of Database more clearly, and invoke the mapping / saving code here
+    db.onlyDoMapping();
 
     // then fetch the depth maps / poses, and convert them to 2D -> 3D image
     // maps
-    map<int, cv::SparseMat> scene_coordinate_maps =
+    map<int, sdl::SceneCoordinateMap> scene_coordinate_maps =
         map_gen->getSceneCoordinateMaps();
     map<int, dso::SE3>* poses = map_gen->getPoses();
 
+//    for (unsigned int frame_id = 0; frame_id <= frames->size(); ++frame_id) {
     for (unsigned int frame_id = 0; frame_id <= frames->size(); ++frame_id) {
       auto iter = scene_coordinate_maps.find(frame_id);
       if (iter == scene_coordinate_maps.end() ||
           poses->find(frame_id) == poses->end()) {
         continue;
       } else {
-        // this is really only necessary because some datasets are 1-indexed and
-        // some are 0-indexed
-        if (frames->find(frame_id) == frames->end()) {
-          continue;
-        }
+//        // this is really only necessary because some datasets are 1-indexed and
+//        // some are 0-indexed
+//        if (frames->find(frame_id) == frames->end()) {
+//          continue;
+//        }
 
         sdl::Frame* f = frames->at(frame_id).get();
-        f->saveSceneCoordinates(iter->second);
+        sdl::SceneCoordinateMap& scene_coords = iter->second;
+        if (save_ground_truth_depth) {
+          // Nevermind. The ground truth isn't calibrated and it has a very low
+          // depth-resolution--what we really need is the meshed reconstruction.
+          assert(false);
+          cv::Mat depth;
+          scene_parser->loadGroundTruthDepth(*f, depth);
+        }
+        f->saveSceneCoordinates(scene_coords);
 
         cv::Mat image = f->imageLoader();
 

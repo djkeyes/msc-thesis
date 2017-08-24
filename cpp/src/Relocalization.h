@@ -50,7 +50,7 @@ struct Frame {
                        const cv::Mat& descriptors) const;
 
   boost::filesystem::path getSceneCoordinateFilename() const;
-  void saveSceneCoordinates(cv::SparseMat coordinate_map) const;
+  void saveSceneCoordinates(const SceneCoordinateMap& coordinate_map) const;
   cv::SparseMat loadSceneCoordinates() const;
   boost::filesystem::path getPoseFilename() const;
   void savePose(const dso::SE3& pose) const;
@@ -127,6 +127,9 @@ class Database {
     // TODO: clean this up
     K_ = mapGen->getCalibration();
   }
+  void setGtPoseLoader(std::function<bool(const Frame&, cv::Mat&, cv::Mat&)> gt_pose_loader) {
+    gtPoseLoader = gt_pose_loader;
+  }
   DsoMapGenerator* getMapper() { return mapGen.get(); }
 
   cv::Mat getCalibration() {
@@ -135,6 +138,8 @@ class Database {
 
   void copyVocabularyFileFrom(const Database& from) const;
   bool hasCachedVocabularyFile() const;
+
+  void onlyDoMapping();
 
   unsigned int db_id;
 
@@ -200,13 +205,16 @@ class Database {
 
   std::unique_ptr<InvertedIndexImpl> pInvertedIndexImpl;
 
+  std::function<bool(const Frame&, cv::Mat&, cv::Mat&)> gtPoseLoader;
+
   cv::Mat K_;
 };
 
 std::map<int, cv::DMatch> doRatioTest(cv::Mat query_descriptors,
                                       cv::Mat db_descriptors,
                                       cv::Ptr<cv::DescriptorMatcher> matcher,
-                                      double ratio_threshold);
+                                      double ratio_threshold,
+                                      bool use_distance_threshold);
 }  // namespace sdl
 
 #endif /* SRC_RELOCALIZATION_H_ */

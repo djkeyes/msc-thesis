@@ -43,14 +43,20 @@ class SceneParser {
   virtual void parseScene(
       std::vector<sdl::Database>& dbs,
       std::vector<std::pair<std::vector<std::reference_wrapper<sdl::Database>>,
-                            std::vector<sdl::Query>>>& dbs_with_queries) = 0;
+                            std::vector<sdl::Query>>>& dbs_with_queries,
+      bool inject_ground_truth) = 0;
 
   /*
    * Given a frame, load the ground truth pose (as a rotation and translation
    * matrix) from the dataset.
    */
-  virtual void loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
+  virtual bool loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
                                    cv::Mat& translation) = 0;
+  /*
+   * Given a frame, load the ground truth depth map.
+   */
+  virtual bool loadGroundTruthDepth(const sdl::Frame& frame,
+                                    cv::Mat& depth) = 0;
 
   void setCache(boost::filesystem::path cache_dir) { cache = cache_dir; }
   const boost::filesystem::path& getCache() { return cache; }
@@ -67,14 +73,22 @@ class CambridgeLandmarksParser : public SceneParser {
   void parseScene(
       std::vector<sdl::Database>& dbs,
       std::vector<std::pair<std::vector<std::reference_wrapper<sdl::Database>>,
-                            std::vector<sdl::Query>>>& dbs_with_queries)
-      override;
-  virtual void loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
-                                   cv::Mat& translation);
+                            std::vector<sdl::Query>>>& dbs_with_queries,
+      bool inject_ground_truth) override;
+  bool loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
+                           cv::Mat& translation) override;
+  bool loadGroundTruthDepth(const sdl::Frame& frame, cv::Mat& depth) override {
+    assert(false);
+    return false;
+  }
 
  private:
   boost::filesystem::path directory;
+  void loadGtPosesFromFile(boost::filesystem::path pose_path, bool is_street);
   std::set<std::string> accumulateSubdirsFromFile(const std::string& filename);
+  std::map<int, std::map<int, std::tuple<cv::Mat, cv::Mat>>>
+      rotationsAndTranslationsByDatabaseAndFrame;
+  std::map<std::string, std::reference_wrapper<Database>> dbsByName;
 };
 
 class SevenScenesParser : public SceneParser {
@@ -85,10 +99,11 @@ class SevenScenesParser : public SceneParser {
   void parseScene(
       std::vector<sdl::Database>& dbs,
       std::vector<std::pair<std::vector<std::reference_wrapper<sdl::Database>>,
-                            std::vector<sdl::Query>>>& dbs_with_queries)
-      override;
-  virtual void loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
-                                   cv::Mat& translation);
+                            std::vector<sdl::Query>>>& dbs_with_queries,
+      bool inject_ground_truth) override;
+  bool loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
+                           cv::Mat& translation) override;
+  bool loadGroundTruthDepth(const sdl::Frame& frame, cv::Mat& depth) override;
 
  private:
   boost::filesystem::path directory;
@@ -102,11 +117,15 @@ class TumParser : public SceneParser {
   void parseScene(
       std::vector<sdl::Database>& dbs,
       std::vector<std::pair<std::vector<std::reference_wrapper<sdl::Database>>,
-                            std::vector<sdl::Query>>>& dbs_with_queries)
-      override;
+                            std::vector<sdl::Query>>>& dbs_with_queries,
+      bool inject_ground_truth) override;
 
-  virtual void loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
-                                   cv::Mat& translation);
+  bool loadGroundTruthPose(const sdl::Frame& frame, cv::Mat& rotation,
+                           cv::Mat& translation) override;
+  bool loadGroundTruthDepth(const sdl::Frame& frame, cv::Mat& depth) override {
+    assert(false);
+    return false;
+  }
 
  private:
   boost::filesystem::path directory;
