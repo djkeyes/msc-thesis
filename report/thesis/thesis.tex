@@ -1,7 +1,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Author: First Name Last Name
-% Type: Semester/Master Thesis
-% Title: Thesis Title
+% Author: Daniel Keyes
+% Type: Master Thesis
+% Title: Relocalization for Semi-Dense Visual Odometry
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \documentclass[pdflatex,11pt,a4paper,twoside,titlepage]{scrbook}
@@ -12,10 +12,17 @@
 \usepackage[latin1]{inputenc}
 \usepackage{a4wide}
 
+%\usepackage{pdfpages}
 \usepackage{amsmath}
 \usepackage{amsfonts}
 \usepackage{amssymb}
 \usepackage{mathcomp}
+\usepackage{relsize}
+\usepackage{mathtools}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+
+\DeclareMathOperator*{\argmin}{arg\,min}
 
 %\addtokomafont{disposition}{\rmfamily}				% uncomment for serif fonts for headings KOMA classes
 \usepackage[hang,labelfont=bf]{caption}				% configure captions of images, tables etc.
@@ -30,17 +37,18 @@
 
 \usepackage[pdftex]{color,graphicx}
 %\usepackage[hang]{caption}
-\usepackage{subfigure}
+\usepackage{subfig}
 \usepackage{color}
 \usepackage{float}
 \usepackage{hyperref}
+\usepackage{fancyref}
 \usepackage{listings}
 \lstset{keywordstyle=\color{blue}\bfseries\emph, breaklines=true, breakatwhitespace=false}
 \lstset{language=C, basicstyle=\footnotesize, commentstyle=\color{green}}
 \hypersetup
 {
-pdftitle = {Thesis Title},
-pdfauthor = {Name},
+pdftitle = {Relocalization for Semi-Dense Visual Odometry},
+pdfauthor = {Daniel Keyes},
 colorlinks = {true},
 hypertexnames={true},
 plainpages={false},
@@ -108,8 +116,10 @@ breaklinks={true}
 \mainmatter
 
 \include{introduction/introduction}
+\include{relatedwork/relatedwork}
 \include{methodology/methodology}
 \include{experiments/experiments}
+\include{conclusion/conclusion}
 
 \backmatter
 

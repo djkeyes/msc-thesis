@@ -3,51 +3,14 @@
 \chapter{Introduction}
 \label{cha:introduction}
 
+Finding correspondences between recent and formerly visited camera frames is a critical component in many computer vision and robotics systems. For the problem of simultaneous localization and mapping (SLAM), camera relocalization establishes loop closures, which are necessary to correct drift accumulated during the estimate. For applications which do not perform mapping, such as visual odometry (tracking camera movement from video), being able to relocalize is critical to recovering from tracking loss and returning to a known reference frame. This is also relevant to applications on low-power devices, such as mobile robotics or virtual and augmented reality on smartphones, in which it may be desirable to compute a high-quality map ahead of time and track against it later. In some use-cases, such as image retrieval, identifying the pose (i.e.\ the position and orientation) of the viewer in a known map is the goal itself.
 
-Things to cover:
--overview of DSO
--failure case for DSO: pure rotation causes tracking failure. needs relocalization to recover previous scale.
--comment on semi-dense vs dense methods, advantages vs disadvantages
-	-high quality depth maps even from monocular video, whereas other techniques use stereo, structured light cameras, lidar, etc
--maybe some background on deep learning, CNNs, descriptor learning, etc
--maybe some background on image retrieval systems, kd trees vs bag of words, robust camera pose estimation, etc
+In this thesis, we address the problem of relocalization using a recently developed measurement representation called ``semi-dense'' depth maps. In contrast to sparse depth maps, which only store a few nonzero values, and fully dense depth maps, which have a distance stored in every pixel, semi-dense depth maps record the depth of a \textit{significant fraction} of pixels. Recent developments in direct visual odometry \cite{engel2013semi} \cite{engel2017direct} \cite{Forster2014ICRA} have been able to achieve comparable results to depth-based methods, despite only using an RGB camera, and a recurring theme in these methods is the estimation of a semi-dense depth map in each frame. In these works, the maps contain a depth estimate at every pixel with a significant color gradient. This is in contrast to feature-based techniques \cite{klein2007parallel} \cite{murTRO2015}, which only track points located at peaks in the feature response space, and produce a comparatively sparse point cloud. In this thesis, we show how state-of-the-art RGB-D relocalization techniques can be re-applied RGB images paired with semi-dense depth maps.
 
+Monocular (single camera) visual odometry itself comes with a variety of challenges. For example, depth estimation is indeterminate in the case of zero (or very little) camera translation. This can happen if a user rotates a camera around the camera center, perhaps to give a panoramic view of the scene. When camera translation resumes, if no original points are still visible within the viewing frustum, tracking is impossible. Additionally, in lieu of feature matching, direct techniques must make assumptions about camera motion to track pixels from frame to frame. They generally assume small camera movement, and only attempt to track points within a small radius, or (using a motion model) they might search on an epipolar line for the best point correspondence. These assumptions are violated in the case of fast or shaky camera movement, which is common in the real world and further motivates our problem.
 
--Experiments:
--description of each dataset
--for each TUM dataset:
-	-run DSO on video
-	-align first half of video to ground truth
-	-compute visual odometry error of second half of video
-		-DSO shows some kind of color-coded error
-		-LSD-slam shows absolute trajectory error (computed as RMSE)
-		-7scenes papers typically show num frames localized within some threshold
-		-either compute this over just keyframes, or also over intermediate poses
-	-compute sift descriptors at each keyframe
-		-cluster descriptors (probably only for first video?)
-	-feed training data to (initialized) neural net
-	-compute dense descriptors at each keyframe
-	    -cluster descriptors (I guess separately for each video)
-	-create discloc database using frames in first half of video
-    -for each frame in the second half of the video, relocalize against first frame
-	    -for each relocalized pose, compute same errors as before
--for each 7scenes dataset:
-	-run DSO on each video
-	-try to align to ground truth, but fail
-	-compute sift descriptors at each keyframe
-	-feed training data from training videos to (un-initialized?) neural net
-	-compute dense descriptors at each keyframe
-	-cluster descriptors
-	-create discloc database--use all train videos somehow? need to store which video is which so we can re-align later.
-	-for each frame in the test videos, relocalize against train set
-	    -for each relocalized pose, compute num frames localized withing threshold
--for each cambridge landmarks dataset:
-	-do same thing as DSO, if there's time.
+Furthermore, these common sources of tracking failure are exacerbated by the scale ambiguity of video from a single camera. In the absence of inertial measurements or calibrated depth cameras, it is impossible to know the true size of observed objects. For example, in a typical structure-from-motion pipeline, the displacement between the initially chosen frames defines the scale. Because of this, multiple independent reconstructions of the same scene may be at arbitrarily different scales. In an on-line system, if tracking fails, we must recover both the original reference frame and the original scale of the scene.
 
-	
-	-dk's questions:
-		-how does size of visual vocab affect?
-		-what can we do to improve descriptors? dilation? better training examples?
-		-effect of merging descriptors of coobserved points? (not yet implemented)
+In Chapter 2, we give an overview of related work. Chapter 3 gives a detailed description of the relocalization pipeline. This includes a summary of the visual odometry operation and depth map extraction techniques, as well as an overview of a typical image-based relocalization process. We further expound on techniques for descriptor learning and full \mbox{6-degree-of-freedom} camera localization. Chapter 4 presents concrete results on relocalization benchmarks, and we compare our work to prior visual and depth-based relocalization methods. We conclude in Chapter 5 with a discussion of future work, applications, limitations, and possible extensions to the method.
 
 \cleardoublepage
