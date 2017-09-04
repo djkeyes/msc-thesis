@@ -17,7 +17,7 @@ from input_preprocessor import read_transform, read_sparse_scene_coords
 # train_dir = '/home/daniel/data/tmp/tum-descriptors/sequence_01'
 # train_dir = '/home/daniel/data/tmp/heads-descriptors/seq-01'
 # train_dir = '/home/daniel/data/tmp/fire-descriptors/seq-01'
-train_dir = '/home/daniel/data/tmp/stairs/seq-06'
+train_dir = '/home/daniel/data/tmp/redkitchen/seq-05'
 # train_dir = '/home/daniel/data/tmp/heads/seq-02'
 # train_dir = '/home/daniel/data/tmp/fire-morepts/seq-04'
 
@@ -55,8 +55,8 @@ def verify_train_data():
 
     # for the scene coordinates, read by manually, to preserve sparseness
     filename = join(train_dir, scene_coords_path)
-    # this is slow, so skip some
-    if num_processed % 10 == 0:
+    # this is slow to render, so skip some
+    if num_processed % 1 == 0:
       with open(filename, 'rb') as f:
         rows = struct.unpack('=I', f.read(4))[0]
         cols = struct.unpack('=I', f.read(4))[0]
@@ -67,6 +67,12 @@ def verify_train_data():
           x = struct.unpack('=f', f.read(4))[0]
           y = struct.unpack('=f', f.read(4))[0]
           z = struct.unpack('=f', f.read(4))[0]
+
+          # set to true if files also have variance / observer cam pose
+          if False:
+            # read these, but just discard the result
+            # inv depth (float), inv variance (float), pose (7 doubles)
+            f.read(2 * 4 + 7 * 8)
           scene_coords.append((x, y, z))
     num_processed += 1
 

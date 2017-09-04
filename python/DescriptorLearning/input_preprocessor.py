@@ -15,7 +15,7 @@ import caffe
 
 import matplotlib.pyplot as plt
 
-def read_sparse_scene_coords(filename):
+def read_sparse_scene_coords(filename, has_variance=False):
   with open(filename, 'rb') as f:
     rows = struct.unpack('=I', f.read(4))[0]
     cols = struct.unpack('=I', f.read(4))[0]
@@ -28,6 +28,11 @@ def read_sparse_scene_coords(filename):
       x = struct.unpack('=f', f.read(4))[0]
       y = struct.unpack('=f', f.read(4))[0]
       z = struct.unpack('=f', f.read(4))[0]
+
+      if has_variance:
+        # read these, but just discard the result
+        # inv depth (float), inv variance (float), pose (7 doubles)
+        f.read(2*4 + 7*8)
 
       result[row, col, 0] = x
       result[row, col, 1] = y
@@ -148,11 +153,14 @@ class ImageVertexTransformLayer(caffe.Layer):
 
         projected_B = transform_B.dot(np.append(coords, 1))
         projected_A = transform_A.dot(np.append(coords, 1))
-        uB = int(round(projected_B[0]/projected_B[2]*277.34 + 312.234))
-        vB = int(round(projected_B[1]/projected_B[2]*291.402 + 239.777))
-
-        uA = int(round(projected_A[0]/projected_A[2]*277.34 + 312.234))
-        vA = int(round(projected_A[1]/projected_A[2]*291.402 + 239.777))
+        # uB = int(round(projected_B[0]/projected_B[2]*277.34 + 312.234))
+        # vB = int(round(projected_B[1]/projected_B[2]*291.402 + 239.777))
+        # uA = int(round(projected_A[0]/projected_A[2]*277.34 + 312.234))
+        # vA = int(round(projected_A[1]/projected_A[2]*291.402 + 239.777))
+        uB = int(round(projected_B[0]/projected_B[2]*691.2 + 383.5))
+        vB = int(round(projected_B[1]/projected_B[2]*691.2 + 207.5))
+        uA = int(round(projected_A[0]/projected_A[2]*691.2 + 383.5))
+        vA = int(round(projected_A[1]/projected_A[2]*691.2 + 207.5))
 
         if uB < 0 or vB < 0 or uB >= image_A.shape[1] or vB >= image_A.shape[0] or projected_B[2] <= 0:
           num_oob += 1
@@ -160,18 +168,22 @@ class ImageVertexTransformLayer(caffe.Layer):
         if uA < 0 or vA < 0 or uA >= image_A.shape[1] or vA >= image_A.shape[0] or projected_A[2] <= 0:
           num_oob += 1
           continue
-        # if count % 20 == 0:
-        #   rr, cc = line(row, col, vB, image_A.shape[1] + uB)
-        #   stereo[rr, cc, 0] = 0
-        #   stereo[rr, cc, 1] = 1.0
-        #   stereo[rr, cc, 2] = 0
-        #   rr, cc = line(row, col, vA, uA)
-        #   stereo[rr, cc, 0] = 1.0
-        #   stereo[rr, cc, 1] = 0
-        #   stereo[rr, cc, 2] = 0
+
+        if np.isnan(scene_coords_B[vB, uB][0]):
+          num_oob += 1
+          continue
+        if count % 20 == 0:
+          rr, cc = line(row, col, vB, image_A.shape[1] + uB)
+          stereo[rr, cc, 0] = 0
+          stereo[rr, cc, 1] = 1.0
+          stereo[rr, cc, 2] = 0
+          rr, cc = line(row, col, vA, uA)
+          stereo[rr, cc, 0] = 1.0
+          stereo[rr, cc, 1] = 0
+          stereo[rr, cc, 2] = 0
     print "num oob: ", num_oob, "/", count
-    # plt.imshow(stereo)
-    # plt.show()
+    plt.imshow(stereo)
+    plt.show()
 
 
     image_A = image_A.transpose([2, 0, 1])
@@ -193,7 +205,7 @@ class ImageVertexTransformLayer(caffe.Layer):
 
   def load_paths(self):
     paths_by_directory = {}
-    directories = [join(self.data_dir, d) for d in listdir(self.data_dir) if isdir(join(self.data_dir, d))]
+    directories = [join(self.data_dir, d) for d in listdir(self.data_dir) if isdir(join(self.data_dir, d)) and not d.endswith('results')]
     for dir in directories:
       images = sorted([file for file in listdir(dir) if file.startswith('image')])
       scene_coords = sorted([file for file in listdir(dir) if file.startswith('sparse_scene_coords')])
@@ -261,7 +273,7 @@ def load_data(directory, image_file, scene_coord_file, transform_file):
   print 'reading from directory ', directory, ' image ', image_file
   image = load_image(join(directory, image_file))
   scene_coords = read_sparse_scene_coords(join(directory, scene_coord_file))  # np.full([480, 640, 3], np.nan)
-  print np.count_nonzero(~np.isnan(scene_coords)) / 2, ' non-nan vectors'
+  print np.count_nonzero(~np.isnan(scene_coords)) / 3, ' non-nan vectors'
   transform = read_transform(join(directory, transform_file))  # np.zeros([3, 4])
 
   image = image.astype(np.float32)
