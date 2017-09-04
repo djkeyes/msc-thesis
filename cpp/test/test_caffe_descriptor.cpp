@@ -13,32 +13,33 @@ using std::string;
 using std::cout;
 using std::endl;
 using std::unique_ptr;
+using std::make_pair;
 using std::move;
 using std::vector;
 using cv::Mat;
 using cv::KeyPoint;
 using cv::noArray;
 using cv::SparseMat;
-using cv::Vec3f;
 
 bool test_loading_simple_caffenet() {
   unique_ptr<caffe::Net<float>> net = sdl::readCaffeModel(
       "/home/daniel/git/msc-thesis/python/DescriptorLearning/"
       "test.prototxt",
       "/home/daniel/experiments/denseCorrespondence/"
-      "snap_fullres_labscene_iter_1000.caffemodel");
+      "snap_adam_iter_23000.caffemodel");
 
   sdl::DenseDescriptorFromCaffe descriptor_extractor(move(net));
 
   // These have to conform exactly to the prototxt. Not sure how to resize them.
-  int dims[2] = {480, 640};
-  Mat img = Mat::zeros(dims[0], dims[1], CV_8UC3);
+  int height = 480;
+  int width = 640;
+  Mat img = Mat::zeros(height, width, CV_8UC3);
 
-  SparseMat scene_coords(2, dims, CV_32FC3);
-  scene_coords.ref<Vec3f>(0, 0) = Vec3f(1, 2, 3);
-  scene_coords.ref<Vec3f>(5, 5) = Vec3f(1, 2, 3);
-  scene_coords.ref<Vec3f>(20, 0) = Vec3f(1, 2, 3);
-  scene_coords.ref<Vec3f>(0, 60) = Vec3f(1, 2, 3);
+  sdl::SceneCoordinateMap scene_coords(height, width);
+  scene_coords.coords[make_pair(0, 0)] = sdl::SceneCoord(cv::Vec3f(1, 2, 3));
+  scene_coords.coords[make_pair(5, 5)] = sdl::SceneCoord(cv::Vec3f(1, 2, 3));
+  scene_coords.coords[make_pair(20, 0)] = sdl::SceneCoord(cv::Vec3f(1, 2, 3));
+  scene_coords.coords[make_pair(0, 60)] = sdl::SceneCoord(cv::Vec3f(1, 2, 3));
   descriptor_extractor.setCurrentSceneCoords(scene_coords);
 
   vector<KeyPoint> keypoints;
@@ -46,13 +47,14 @@ bool test_loading_simple_caffenet() {
   descriptor_extractor.detectAndCompute(img, noArray(), keypoints, descriptors);
 
   assert(keypoints.size() == 4);
-  assert(keypoints.size() == scene_coords.nzcount());
+  assert(keypoints.size() == scene_coords.coords.size());
   assert(static_cast<int>(keypoints.size()) == descriptors.rows);
   unsigned int num_matched_keypoints = 0;
   for (const auto& keypoint : keypoints) {
-    for (auto iter = scene_coords.begin(); iter != scene_coords.end(); ++iter) {
-      int* index = iter.node()->idx;
-      if (index[0] == keypoint.pt.y && index[1] == keypoint.pt.x) {
+    for (const auto& element : scene_coords.coords) {
+      int row = element.first.first;
+      int col = element.first.second;
+      if (row == keypoint.pt.y && col == keypoint.pt.x) {
         num_matched_keypoints++;
         break;
       }
@@ -132,11 +134,11 @@ bool test_single_layer_net() {
   img.at<cv::Vec3b>(20, 0) = cv::Vec3b(7, 8, 9);
   img.at<cv::Vec3b>(0, 60) = cv::Vec3b(253, 254, 255);
 
-  SparseMat scene_coords(2, dims, CV_32FC3);
-  scene_coords.ref<Vec3f>(0, 0) = Vec3f(1, 2, 3);
-  scene_coords.ref<Vec3f>(5, 5) = Vec3f(1, 2, 3);
-  scene_coords.ref<Vec3f>(20, 0) = Vec3f(1, 2, 3);
-  scene_coords.ref<Vec3f>(0, 60) = Vec3f(1, 2, 3);
+  sdl::SceneCoordinateMap scene_coords(dims[0], dims[1]);
+  scene_coords.coords[make_pair(0, 0)] = sdl::SceneCoord(cv::Vec3f(1, 2, 3));
+  scene_coords.coords[make_pair(5, 5)] = sdl::SceneCoord(cv::Vec3f(1, 2, 3));
+  scene_coords.coords[make_pair(20, 0)] = sdl::SceneCoord(cv::Vec3f(1, 2, 3));
+  scene_coords.coords[make_pair(0, 60)] = sdl::SceneCoord(cv::Vec3f(1, 2, 3));
   descriptor_extractor.setCurrentSceneCoords(scene_coords);
 
   vector<KeyPoint> keypoints;
@@ -144,13 +146,14 @@ bool test_single_layer_net() {
   descriptor_extractor.detectAndCompute(img, noArray(), keypoints, descriptors);
 
   assert(keypoints.size() == 4);
-  assert(keypoints.size() == scene_coords.nzcount());
+  assert(keypoints.size() == scene_coords.coords.size());
   assert(static_cast<int>(keypoints.size()) == descriptors.rows);
   unsigned int num_matched_keypoints = 0;
   for (const auto& keypoint : keypoints) {
-    for (auto iter = scene_coords.begin(); iter != scene_coords.end(); ++iter) {
-      int* index = iter.node()->idx;
-      if (index[0] == keypoint.pt.y && index[1] == keypoint.pt.x) {
+    for (const auto& element : scene_coords.coords) {
+      int row = element.first.first;
+      int col = element.first.second;
+      if (row == keypoint.pt.y && col == keypoint.pt.x) {
         num_matched_keypoints++;
         break;
       }
@@ -187,6 +190,7 @@ bool test_single_layer_net() {
 
 int main(int argc, char** argv) {
   bool any_tests_failed = false;
+  sdl::saveVariance = false;
   any_tests_failed |= test_loading_simple_caffenet();
   any_tests_failed |= test_single_layer_net();
   return any_tests_failed;

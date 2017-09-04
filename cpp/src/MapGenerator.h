@@ -18,7 +18,43 @@
 
 namespace sdl {
 
+extern bool saveVariance;
+
 typedef std::pair<dso::Vec3, float> ColoredPoint;
+
+struct SceneCoord {
+  SceneCoord()
+      : coord(cv::Vec3f()),
+        hasVariance(false),
+        inverseDepth(-1),
+        inverseVariance(-1),
+        observerCam2World(dso::SE3()) {}
+  explicit SceneCoord(cv::Vec3f coord)
+      : coord(coord),
+        hasVariance(false),
+        inverseDepth(-1),
+        inverseVariance(-1),
+        observerCam2World(dso::SE3()) {
+    assert(!saveVariance);
+  }
+  explicit SceneCoord(cv::Vec3f coord, float inverse_depth,
+                      float inverse_variance, dso::SE3 observer_cam2world)
+      : coord(coord),
+        hasVariance(true),
+        inverseDepth(inverse_depth),
+        inverseVariance(inverse_variance),
+        observerCam2World(observer_cam2world) {
+    assert(saveVariance);
+  }
+
+  cv::Vec3f coord;
+  bool hasVariance;
+  float inverseDepth;
+  float inverseVariance;
+  dso::SE3 observerCam2World;
+
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+};
 
 /*
  * Sparse matrix mapping from image coordinates to scene coordinates. This is
@@ -26,10 +62,16 @@ typedef std::pair<dso::Vec3, float> ColoredPoint;
  * also stores covariance information accrued from multiple camera observations.
  */
 struct SceneCoordinateMap {
+  SceneCoordinateMap() : height(0), width(0) {}
   SceneCoordinateMap(int height, int width) : height(height), width(width) {}
 
+  // TODO: it would be nice if this class wrapped the map below, but also
+  // include bounds checks or something.
   int height, width;
-  std::map<std::pair<int, int>, cv::Vec3f> coords;
+  std::map<std::pair<int, int>, SceneCoord, std::less<std::pair<int, int>>,
+           Eigen::aligned_allocator<
+               std::pair<const std::pair<int, int>, SceneCoord>>>
+      coords;
 };
 class DsoDatasetReader {
  public:

@@ -3,6 +3,7 @@
 #include <exception>
 #include <iomanip>
 #include <iostream>
+#include <list>
 #include <locale>
 #include <map>
 #include <memory>
@@ -36,10 +37,14 @@ using namespace cv;
 namespace sdl {
 
 bool use_second_best_for_debugging = false;
-bool display_top_matching_images = true;
 bool save_first_trajectory = true;
-bool display_stereo_correspondences = true;
+bool display_top_matching_images = false;
+bool display_stereo_correspondences = false;
 bool use_5pt_for_verif = false;  // true: 5pt essential mat. false: 4pt PnP
+
+int ransac_num_iters = 10000;  // 500;
+double ransac_confidence = 0.999999;  // 0.999;
+double ransac_threshold = 8.0;
 
 int vocabulary_size;
 double epsilon_angle_deg;
@@ -75,7 +80,6 @@ class MatchingMethod {
   void updateResults(const Query& q, const Result& top_result, Mat inlier_mask,
                      Mat R, Mat t, const vector<Point2f>& query_pts,
                      const vector<Point2f>& database_pts) {
-
     // should this threshold be a function of the ransac model DOF?
     if (countNonZero(inlier_mask) >= 12) {
       high_inlier_queries++;
@@ -113,7 +117,8 @@ class MatchingMethod {
         if (inlier_mask.at<int32_t>(i, 0) > 0) {
           color = Scalar(0, 255, 0);
         } else {
-          color = Scalar(0, 0, 255);
+//          color = Scalar(0, 0, 255);
+          continue;
         }
 
         line(stereo, query_pts[i], database_pts[i] + offset, color);
@@ -478,29 +483,29 @@ class Match_2d_3d_pnp : public MatchingMethod {
                           const vector<Point2f>& query_pts,
                           const vector<Point2f>& database_pts, Mat& inlier_mask,
                           Mat& R, Mat& t) override {
-    int num_iters = 1000;
-    double confidence = 0.9999999;
-    double ransac_threshold = 8.0;
-
     // lookup scene coords from database_pts
-    SparseMat scene_coords = top_result.frame.loadSceneCoordinates();
+    SceneCoordinateMap scene_coords = top_result.frame.loadSceneCoordinates();
     Mat tmp;
     vector<KeyPoint> keypoints;
     top_result.frame.loadDescriptors(keypoints, tmp);
     for (const auto& kpt : keypoints) {
       const auto& point = kpt.pt;
       // every keypoint should be at a valid depth pixel
-      assert(scene_coords.ptr(static_cast<int>(point.y),
-                              static_cast<int>(point.x), false) != NULL);
+      assert(scene_coords.coords.find(make_pair(static_cast<int>(point.y),
+                                                static_cast<int>(point.x))) !=
+             scene_coords.coords.end());
     }
 
     vector<Point3f> scene_coord_vec;
     scene_coord_vec.reserve(database_pts.size());
     for (const auto& point : database_pts) {
-      assert(scene_coords.ptr(static_cast<int>(point.y),
-                              static_cast<int>(point.x), false) != NULL);
-      scene_coord_vec.push_back(scene_coords.value<Point3f>(
-          static_cast<int>(point.y), static_cast<int>(point.x)));
+      assert(scene_coords.coords.find(make_pair(static_cast<int>(point.y),
+                                                static_cast<int>(point.x))) !=
+             scene_coords.coords.end());
+      scene_coord_vec.push_back(scene_coords.coords
+                                    .at(make_pair(static_cast<int>(point.y),
+                                                  static_cast<int>(point.x)))
+                                    .coord);
     }
 
     if (scene_coord_vec.size() == 0) {
@@ -512,8 +517,10 @@ class Match_2d_3d_pnp : public MatchingMethod {
 
     Mat rvec, inliers;
 
+//    cout << "\tstarting ransac..." << endl;
     solvePnPRansac(scene_coord_vec, query_pts, K, noArray(), rvec, t, false,
-                   num_iters, ransac_threshold, confidence, inliers);
+                   ransac_num_iters, ransac_threshold, ransac_confidence, inliers);
+//    cout << "\transac complete!" << endl;
     Rodrigues(rvec, R);
 
     R.convertTo(R, CV_32F);
@@ -710,6 +717,20 @@ int main(int argc, char** argv) {
     db.runVoAndComputeDescriptors();
   }
 
+  // all query frames should be initialized
+  for (auto& train_query : dbs_with_queries) {
+    for (sdl::Query& query : train_query.second) {
+      if (!query.getFrame()->descriptorsExist()) {
+        throw runtime_error("A query does not yet have descriptors!");
+      }
+    }
+  }
+
+  // Free feature detector, no longer needed
+  if (sdl::use_caffe_descriptor) {
+    detector.staticCast<sdl::DenseDescriptorFromCaffe>()->freeNet();
+  }
+
   for (pair<vector<reference_wrapper<sdl::Database>>, vector<sdl::Query>>&
            train_query : dbs_with_queries) {
     sdl::Database& db = train_query.first[0];
@@ -718,15 +739,6 @@ int main(int argc, char** argv) {
       continue;
     }
     db.assignAndBuildIndex(train_query.first);
-  }
-
-  // all query frames should be initialized
-  for (auto& train_query : dbs_with_queries) {
-    for (sdl::Query& query : train_query.second) {
-      if (!query.getFrame()->descriptorsExist()) {
-        throw runtime_error("A query does not yet have descriptors!");
-      }
-    }
   }
 
   int orig_query_count = 0;
@@ -754,7 +766,7 @@ int main(int argc, char** argv) {
   Mat K = dbs[0].getCalibration();
   sdl::matching_method->setK(K);
 
-  int num_to_return = 50;
+  int num_to_return = 20;
 
   int total_queries = 0;
 
@@ -777,8 +789,10 @@ int main(int argc, char** argv) {
       vector<reference_wrapper<sdl::Database>> all_training_dbs =
           train_query.first;
 
+      cout << "\tquerying index..." << endl;
       vector<sdl::Result> results =
           db.lookup(query, num_to_return, all_training_dbs);
+      cout << "\tquery complete!" << endl;
       unsigned int top_index = sdl::use_second_best_for_debugging ? 1 : 0;
       if (results.size() <= top_index) {
         cout << results.size() << " results returned!" << endl;
@@ -801,14 +815,17 @@ int main(int argc, char** argv) {
                                                     db_descriptors);
 
           // check ratio test
-          map<int, DMatch> best_match_per_trainidx(sdl::doRatioTest(
-              q_descriptors, db_descriptors, matcher, sdl::ratio_threshold, sdl::use_caffe_descriptor));
+          map<int, list<DMatch>> best_match_per_trainidx(sdl::doRatioTest(
+              q_descriptors, db_descriptors, matcher, sdl::ratio_threshold,
+              sdl::use_caffe_descriptor));
           vector<Point2f> p1, p2;
           p1.reserve(best_match_per_trainidx.size());
           p2.reserve(best_match_per_trainidx.size());
           for (auto& element : best_match_per_trainidx) {
-            p1.push_back(query_keypoints[element.second.queryIdx].pt);
-            p2.push_back(result_keypoints[element.second.trainIdx].pt);
+            for (auto& match : element.second) {
+              p1.push_back(query_keypoints[match.queryIdx].pt);
+              p2.push_back(result_keypoints[match.trainIdx].pt);
+            }
           }
 
           if (p1.size() == 0) {
@@ -823,27 +840,31 @@ int main(int argc, char** argv) {
                              inlier_mask);
             num_inliers[result_idx] = countNonZero(inlier_mask);
           } else {
-            SparseMat scene_coords = results[result_idx].frame.loadSceneCoordinates();
+            sdl::SceneCoordinateMap scene_coords =
+                results[result_idx].frame.loadSceneCoordinates();
             vector<KeyPoint> keypoints;
 
             vector<Point3f> scene_coord_vec;
             scene_coord_vec.reserve(p2.size());
             for (const auto& point : p2) {
-              assert(scene_coords.ptr(static_cast<int>(point.y),
-                                      static_cast<int>(point.x),
-                                      false) != nullptr);
-              scene_coord_vec.push_back(scene_coords.value<Point3f>(
-                  static_cast<int>(point.y), static_cast<int>(point.x)));
+              assert(
+                  scene_coords.coords.find(make_pair(
+                      static_cast<int>(point.y), static_cast<int>(point.x))) !=
+                  scene_coords.coords.end());
+              scene_coord_vec.push_back(
+                  scene_coords.coords
+                      .at(make_pair(static_cast<int>(point.y),
+                                    static_cast<int>(point.x)))
+                      .coord);
             }
 
             Mat rvec, t, inliers;
 
-            int num_iters = 1000;
-            double confidence = 0.9999999;
-            double ransac_threshold = 8.0;
-            solvePnPRansac(scene_coord_vec, p1, K, noArray(), rvec, t,
-                           false, num_iters, ransac_threshold, confidence,
-                           inliers);
+//            cout << "\tstarting ransac for geom verif..." << endl;
+            solvePnPRansac(scene_coord_vec, p1, K, noArray(), rvec, t, false,
+                           sdl::ransac_num_iters, sdl::ransac_threshold,
+                           sdl::ransac_confidence, inliers, SOLVEPNP_EPNP);
+//            cout << "\transac complete!" << endl;
             num_inliers[result_idx] = inliers.rows*inliers.cols;
           }
         }
@@ -865,12 +886,15 @@ int main(int argc, char** argv) {
       // ignore the matches used during inverted index voting. just compute our
       // own.
       // check ratio test
-      map<int, DMatch> best_match_per_trainidx(sdl::doRatioTest(
-          q_descriptors, db_descriptors, matcher, sdl::ratio_threshold, sdl::use_caffe_descriptor));
+      map<int, list<DMatch>> best_match_per_trainidx(
+          sdl::doRatioTest(q_descriptors, db_descriptors, matcher,
+                           sdl::ratio_threshold, sdl::use_caffe_descriptor));
       vector<DMatch> matches;
       matches.reserve(best_match_per_trainidx.size());
       for (auto& element : best_match_per_trainidx) {
-        matches.push_back(element.second);
+        for (auto& match : element.second) {
+          matches.push_back(match);
+        }
       }
 
       // display the result in a pretty window
@@ -930,13 +954,15 @@ int main(int argc, char** argv) {
               results[index].frame.loadDescriptors(result_keypoints,
                                                    db_descriptors);
               // check ratio test
-              map<int, DMatch> best_match_per_trainidx(
-                  sdl::doRatioTest(q_descriptors, db_descriptors, matcher,
-                                   sdl::ratio_threshold, sdl::use_caffe_descriptor));
+              map<int, list<DMatch>> best_match_per_trainidx(sdl::doRatioTest(
+                  q_descriptors, db_descriptors, matcher, sdl::ratio_threshold,
+                  sdl::use_caffe_descriptor));
               for (auto& element : best_match_per_trainidx) {
-                // draw larger than 1 pixel, so it shows up after resizing
-                circle(image, result_keypoints[element.second.trainIdx].pt, 3,
-                       Scalar(0, 0, 255), -1);
+                for (auto& match : element.second) {
+                  // draw larger than 1 pixel, so it shows up after resizing
+                  circle(image, result_keypoints[match.trainIdx].pt, 3,
+                         Scalar(0, 0, 255), -1);
+                }
               }
             }
 
@@ -1011,6 +1037,60 @@ int main(int argc, char** argv) {
           }
 
           string window_name("Correspondences in top result");
+          namedWindow(window_name, WINDOW_AUTOSIZE);
+          imshow(window_name, stereo);
+          waitKey(0);
+          destroyWindow(window_name);
+        }
+
+        {
+          // visualize descriptor distance
+          Mat query_img = query.getFrame()->imageLoader();
+          Mat result = top_result.frame.imageLoader();
+          Mat stereo;
+          stereo.create(query_img.rows, query_img.cols + result.cols, query_img.type());
+
+          query_img.copyTo(stereo.colRange(0, query_img.cols));
+          result.copyTo(stereo.colRange(query_img.cols, query_img.cols + result.cols));
+
+          vector<KeyPoint> query_keypoints;
+          Mat query_descriptors;
+          query.getFrame()->loadDescriptors(query_keypoints, query_descriptors);
+
+          // just choose a keypoint in the middle
+          int mid = query_keypoints.size() / 2;
+          KeyPoint& kpt = query_keypoints[mid];
+          circle(stereo, kpt.pt, 5, cv::Scalar(0, 0, 0), -1);
+          circle(stereo, kpt.pt, 4, cv::Scalar(0, 0, 255), -1);
+          Mat descr = query_descriptors.row(mid);
+
+          vector<KeyPoint> result_keypoints;
+          Mat result_descriptors;
+          top_result.frame.loadDescriptors(result_keypoints,
+                                           result_descriptors);
+
+          Mat kpts_as_distance(1, result_keypoints.size() + 1, CV_32F);
+          float maxdist = 0;
+          for (unsigned int i = 0; i < result_keypoints.size(); ++i) {
+            float dist = cv::norm(result_descriptors.row(i) - descr);
+            maxdist = max(maxdist, dist);
+            kpts_as_distance.at<float>(0, i) = dist;
+          }
+          kpts_as_distance.at<float>(0, result_keypoints.size()) = 0.0f;
+          kpts_as_distance = (1 - kpts_as_distance / maxdist) * 255;
+          kpts_as_distance.convertTo(kpts_as_distance, CV_8UC1);
+
+          Mat kpts_color;
+          cv::applyColorMap(kpts_as_distance, kpts_color,
+                            cv::ColormapTypes::COLORMAP_JET);
+          for (unsigned int i = 0; i < result_keypoints.size(); ++i) {
+            cv::Vec3b color = kpts_color.at<cv::Vec3b>(0, i);
+            circle(stereo,
+                   result_keypoints[i].pt + cv::Point2f(query_img.cols, 0), 2,
+                   color, -1);
+          }
+
+          string window_name("Similarity of keypoints to an arbitrary point");
           namedWindow(window_name, WINDOW_AUTOSIZE);
           imshow(window_name, stereo);
           waitKey(0);

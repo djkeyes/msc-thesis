@@ -20,7 +20,7 @@ void NearestDescriptorAssigner::detectAndCompute(InputArray image_,
                                                  vector<KeyPoint>& keypoints,
                                                  OutputArray descriptors,
                                                  bool useProvidedKeypoints) {
-  if (curSceneCoords.nzcount() == 0) {
+  if (curSceneCoords.coords.size() == 0) {
     return;
   }
 
@@ -56,10 +56,9 @@ void NearestDescriptorAssigner::detectAndCompute(InputArray image_,
     }
 
     keypoints.clear();
-    for (auto iter = curSceneCoords.begin(); iter != curSceneCoords.end();
-         ++iter) {
-      int y = iter.node()->idx[0];
-      int x = iter.node()->idx[1];
+    for (const auto& element : curSceneCoords.coords) {
+      int y = element.first.first;
+      int x = element.first.second;
 
       int row = floor(y / dist_threshold);
       int col = floor(x / dist_threshold);

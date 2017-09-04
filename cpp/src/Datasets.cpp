@@ -321,6 +321,11 @@ bool CambridgeLandmarksParser::loadGroundTruthPose(const sdl::Frame& frame,
   auto& rotsAndTrans =
       rotationsAndTranslationsByDatabaseAndFrame.at(frame.dbId);
   if (rotsAndTrans.find(frame.index) == rotsAndTrans.end()) {
+    float nan = numeric_limits<float>::quiet_NaN();
+    rotation = Mat(get<0>(rotsAndTrans.begin()->second).size(),
+                   get<0>(rotsAndTrans.begin()->second).type(), nan);
+    translation = Mat(get<1>(rotsAndTrans.begin()->second).size(),
+                      get<1>(rotsAndTrans.begin()->second).type(), nan);
     return false;
   }
   rotation = get<0>(rotsAndTrans.at(frame.index));

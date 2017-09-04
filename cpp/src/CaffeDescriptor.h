@@ -43,7 +43,12 @@ class DenseDescriptorFromCaffe : public SceneCoordFeatureDetector {
                         cv::OutputArray descriptors,
                         bool useProvidedKeypoints = false) override;
 
+  // releases the net to free up memory. Subsequent descriptor evaluations will
+  // fail.
+  void freeNet() { net.reset(); }
+
  private:
+  int outputSize;
   std::unique_ptr<caffe::Net<float>> net;
   caffe::MemoryDataLayer<float>* dataLayer;
   caffe::Blob<float>* outputBlob;

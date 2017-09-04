@@ -51,7 +51,7 @@ struct Frame {
 
   boost::filesystem::path getSceneCoordinateFilename() const;
   void saveSceneCoordinates(const SceneCoordinateMap& coordinate_map) const;
-  cv::SparseMat loadSceneCoordinates() const;
+  SceneCoordinateMap loadSceneCoordinates() const;
   boost::filesystem::path getPoseFilename() const;
   void savePose(const dso::SE3& pose) const;
   dso::SE3 loadPose() const;
@@ -210,11 +210,10 @@ class Database {
   cv::Mat K_;
 };
 
-std::map<int, cv::DMatch> doRatioTest(cv::Mat query_descriptors,
-                                      cv::Mat db_descriptors,
-                                      cv::Ptr<cv::DescriptorMatcher> matcher,
-                                      double ratio_threshold,
-                                      bool use_distance_threshold);
+std::map<int, std::list<cv::DMatch>> doRatioTest(
+    cv::Mat query_descriptors, cv::Mat db_descriptors,
+    cv::Ptr<cv::DescriptorMatcher> matcher, double ratio_threshold,
+    bool use_distance_threshold);
 }  // namespace sdl
 
 #endif /* SRC_RELOCALIZATION_H_ */

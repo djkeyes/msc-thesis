@@ -156,8 +156,10 @@ void Frame::saveDescriptors(const vector<KeyPoint>& keypoints,
     ofs.write(reinterpret_cast<const char*>(&keypoints[i].pt.x), sizeof(float));
     ofs.write(reinterpret_cast<const char*>(&keypoints[i].pt.y), sizeof(float));
     ofs.write(reinterpret_cast<const char*>(&keypoints[i].size), sizeof(float));
-    ofs.write(reinterpret_cast<const char*>(&keypoints[i].angle), sizeof(float));
-    ofs.write(reinterpret_cast<const char*>(&keypoints[i].response), sizeof(float));
+    ofs.write(reinterpret_cast<const char*>(&keypoints[i].angle),
+              sizeof(float));
+    ofs.write(reinterpret_cast<const char*>(&keypoints[i].response),
+              sizeof(float));
     ofs.write(reinterpret_cast<const char*>(&octave), sizeof(uint32_t));
     ofs.write(reinterpret_cast<const char*>(&class_id), sizeof(uint32_t));
   }
@@ -170,7 +172,8 @@ boost::filesystem::path Frame::getSceneCoordinateFilename() const {
   ss << "sparse_scene_coords_" << setfill('0') << setw(6) << index << ".bin";
   return cachePath / ss.str();
 }
-void Frame::saveSceneCoordinates(const SceneCoordinateMap& coordinate_map) const {
+void Frame::saveSceneCoordinates(
+    const SceneCoordinateMap& coordinate_map) const {
   fs::path filename(getSceneCoordinateFilename().string());
   fs::create_directories(filename.parent_path());
 
@@ -183,20 +186,46 @@ void Frame::saveSceneCoordinates(const SceneCoordinateMap& coordinate_map) const
   ofs.write(reinterpret_cast<const char*>(&cols), sizeof(uint32_t));
   ofs.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
   for (const auto& element : coordinate_map.coords) {
-    const cv::Vec3f& val = element.second;
+    const cv::Vec3f& val = element.second.coord;
     uint16_t row = element.first.first;
     uint16_t col = element.first.second;
     ofs.write(reinterpret_cast<const char*>(&row), sizeof(uint16_t));
     ofs.write(reinterpret_cast<const char*>(&col), sizeof(uint16_t));
     ofs.write(reinterpret_cast<const char*>(&val), sizeof(cv::Vec3f));
+
+    // NOTE: THIS MAKES SAVED BINARIES INCOMPATIBLE WITH EACH OTHER. BE WARY.
+    if (saveVariance) {
+      assert(element.second.hasVariance);
+      float inv_depth(element.second.inverseDepth);
+      float inv_var(element.second.inverseVariance);
+      SE3 cam2world(element.second.observerCam2World);
+
+      ofs.write(reinterpret_cast<const char*>(&inv_depth), sizeof(float));
+      ofs.write(reinterpret_cast<const char*>(&inv_var), sizeof(float));
+
+      double x = cam2world.translation().x();
+      double y = cam2world.translation().y();
+      double z = cam2world.translation().z();
+      double qx = cam2world.unit_quaternion().x();
+      double qy = cam2world.unit_quaternion().y();
+      double qz = cam2world.unit_quaternion().z();
+      double qw = cam2world.unit_quaternion().w();
+
+      ofs.write(reinterpret_cast<const char*>(&x), sizeof(double));
+      ofs.write(reinterpret_cast<const char*>(&y), sizeof(double));
+      ofs.write(reinterpret_cast<const char*>(&z), sizeof(double));
+      ofs.write(reinterpret_cast<const char*>(&qx), sizeof(double));
+      ofs.write(reinterpret_cast<const char*>(&qy), sizeof(double));
+      ofs.write(reinterpret_cast<const char*>(&qz), sizeof(double));
+      ofs.write(reinterpret_cast<const char*>(&qw), sizeof(double));
+    }
   }
 
   ofs.close();
 }
-cv::SparseMat Frame::loadSceneCoordinates() const {
+SceneCoordinateMap Frame::loadSceneCoordinates() const {
   if (!fs::exists(getSceneCoordinateFilename())) {
-    int sizes[] = {2, 2};
-    return cv::SparseMat(2, sizes, CV_32FC3);
+    return SceneCoordinateMap(2, 2);
   }
   ifstream ifs(getSceneCoordinateFilename().string(),
                ios_base::in | ios_base::binary);
@@ -205,17 +234,40 @@ cv::SparseMat Frame::loadSceneCoordinates() const {
   ifs.read(reinterpret_cast<char*>(&rows), sizeof(uint32_t));
   ifs.read(reinterpret_cast<char*>(&cols), sizeof(uint32_t));
   ifs.read(reinterpret_cast<char*>(&size), sizeof(uint32_t));
-  cv::SparseMat coordinate_map;
-  int dims[] = {static_cast<int>(rows), static_cast<int>(cols)};
-  coordinate_map.create(2, dims, CV_32FC3);
+  SceneCoordinateMap coordinate_map(rows, cols);
   for (int i = 0; i < static_cast<int>(size); ++i) {
     uint16_t row, col;
     ifs.read(reinterpret_cast<char*>(&row), sizeof(uint16_t));
     ifs.read(reinterpret_cast<char*>(&col), sizeof(uint16_t));
     cv::Vec3f val;
     ifs.read(reinterpret_cast<char*>(&val), sizeof(cv::Vec3f));
-    coordinate_map.ref<cv::Vec3f>(static_cast<int>(row),
-                                  static_cast<int>(col)) += val;
+
+    SceneCoord coord;
+    if (saveVariance) {
+      float inv_depth,  inv_variance;
+
+      ifs.read(reinterpret_cast<char*>(&inv_depth), sizeof(float));
+      ifs.read(reinterpret_cast<char*>(&inv_variance), sizeof(float));
+
+      double x, y, z, qx, qy, qz, qw;
+      ifs.read(reinterpret_cast<char*>(&x), sizeof(double));
+      ifs.read(reinterpret_cast<char*>(&y), sizeof(double));
+      ifs.read(reinterpret_cast<char*>(&z), sizeof(double));
+      ifs.read(reinterpret_cast<char*>(&qx), sizeof(double));
+      ifs.read(reinterpret_cast<char*>(&qy), sizeof(double));
+      ifs.read(reinterpret_cast<char*>(&qz), sizeof(double));
+      ifs.read(reinterpret_cast<char*>(&qw), sizeof(double));
+
+      Eigen::Quaterniond q(qw, qx, qy, qz);
+      dso::SE3::Point t(x, y, z);
+      SE3 cam2world(q, t);
+
+      coord = SceneCoord(val, inv_depth, inv_variance, cam2world);
+    } else {
+      coord = SceneCoord(val);
+    }
+    coordinate_map.coords.insert(
+        make_pair(make_pair(row, col), coord));
   }
   ifs.close();
 
@@ -302,42 +354,63 @@ vector<Result> Database::lookup(
   vector<geometric_burstiness::QueryDescriptor<64>> query_descriptors(
       num_features);
 
+  cout << "num features: " << num_features << endl;
+  vector<int> ids;
+  ids.reserve(num_features);
+  for (int i = 0; i < num_features; ++i) {
+    ids.push_back(i);
+  }
+  // if there's a ton of features, just subsample randomly
+  if (num_features > 2000) {
+    std::random_shuffle(ids.begin(), ids.end());
+    ids.resize(2000);
+    num_features = ids.size();
+    cout << "resized to " << ids.size() << endl;
+  }
   for (int j = 0; j < num_features; ++j) {
+    int id = ids[j];
     if (descriptor_size == 128) {
       Map<MatrixXf> descriptor(
-          reinterpret_cast<float*>(descriptors.row(j).data), descriptor_size,
+          reinterpret_cast<float*>(descriptors.row(id).data), descriptor_size,
           1);
       pInvertedIndexImpl->invertedIndex.PrepareQueryDescriptor(
-          descriptor, &(query_descriptors[j]));
-    } else if (descriptor_size == 32) {
+          descriptor, &(query_descriptors[id]));
+    } else if (descriptor_size >= 2 && descriptor_size < 128) {
       // not sure what to do if descriptor_size > 128
-      Map<Matrix<float, 32, 1>> descriptor(
-          reinterpret_cast<float*>(descriptors.row(j).data));
+      Map<MatrixXf> descriptor(
+          reinterpret_cast<float*>(descriptors.row(id).data), descriptor_size,
+          1);
 
       // just 0-pad the descriptor
       Eigen::Matrix<float, 128, 1> padded_descriptor;
-      padded_descriptor << descriptor, Eigen::Matrix<float, 96, 1>::Zero();
+      int padding = 128 - descriptor_size;
+      padded_descriptor << descriptor, Eigen::MatrixXf::Zero(padding, 1);
       pInvertedIndexImpl->invertedIndex.PrepareQueryDescriptor(
           padded_descriptor, &(query_descriptors[j]));
     } else {
-      throw runtime_error("Only descriptors of size 128 and 32 are supported.");
+      throw runtime_error(
+          "Only descriptors in size range [2, 128] are supported.");
     }
 
     query_descriptors[j].relevant_word_ids.insert(
-        query_descriptors[j].relevant_word_ids.end(), assignments[j].begin(),
-        assignments[j].end());
-    query_descriptors[j].x = keypoints[j].pt.x;
-    query_descriptors[j].y = keypoints[j].pt.y;
-    // TODO
+        query_descriptors[j].relevant_word_ids.end(), assignments[id].begin(),
+        assignments[id].end());
+    query_descriptors[j].x = keypoints[id].pt.x;
+    query_descriptors[j].y = keypoints[id].pt.y;
+    // this is irrellevant for us
     query_descriptors[j].a = 0;
     query_descriptors[j].b = 0;
     query_descriptors[j].c = 0;
-    query_descriptors[j].feature_id = j;
+    query_descriptors[j].feature_id = id;
   }
   for (int j = 0; j < num_features; ++j) {
     for (unsigned int k = 0; k < query_descriptors[j].relevant_word_ids.size();
          k++) {
-      query_descriptors[j].max_hamming_distance_per_word.push_back(32);
+      if (descriptor_size == 128) {
+        query_descriptors[j].max_hamming_distance_per_word.push_back(32);
+      } else if (descriptor_size < 128) {
+        query_descriptors[j].max_hamming_distance_per_word.push_back(descriptor_size/4);
+      }
     }
   }
 
@@ -345,17 +418,12 @@ vector<Result> Database::lookup(
   pInvertedIndexImpl->invertedIndex.QueryIndex(query_descriptors,
                                                &image_scores);
 
-//  cout << "num matches and 1-1 matches in top 50 results: ";
   for (unsigned int i = 0; i < std::min<unsigned int>(50, image_scores.size());
        ++i) {
     geometric_burstiness::geometry::AffineFeatureMatches matches_fsm;
     pInvertedIndexImpl->invertedIndex.Get1To1MatchesForSpatialVerification(
         query_descriptors, image_scores[i], &matches_fsm);
-
-//    cout << image_scores[i].matches.size() << "->" << matches_fsm.size()
-//         << "(score=" << image_scores[i].voting_weight << "), ";
   }
-//  cout << endl;
 
   vector<Result> results;
   for (unsigned int i = 0;
@@ -388,16 +456,6 @@ vector<Result> Database::lookup(
       throw runtime_error(ss.str());
     }
 
-    // discard some of the worse correspondences
-//    vector<float> weights;
-//    for (const auto& correspondence : image_scores[i].matches) {
-//      weights.push_back(correspondence.weight);
-//    }
-//    std::sort(weights.begin(), weights.end());
-//    float cutoff =
-//        weights[max(0, min(static_cast<int>(weights.size() - 12),
-//                           static_cast<int>(weights.size() * 0.25)))];
-
     for (const auto& correspondence : matches_fsm) {
       int query_feature_id = correspondence.feature1_.feature_id_;
 
@@ -406,21 +464,6 @@ vector<Result> Database::lookup(
       results.back().matches.emplace_back(query_feature_id, db_feature_id,
                                           image_scores[i].image_id, 1.0);
     }
-    //    for (const auto& correspondence : image_scores[i].matches) {
-    //      int db_feature_id =
-    //          pInvertedIndexImpl->invertedIndex
-    //              .GetIthEntryForWord(correspondence.db_feature_word,
-    //                                  correspondence.db_feature_index)
-    //              .feature_id;
-    //
-    //      if (correspondence.weight < cutoff) {
-    //        continue;
-    //      }
-    // TODO: if this code is uncommented, need to add the multi-database lookup support
-    //      results.back().matches.emplace_back(
-    //          correspondence.query_feature_id, db_feature_id,
-    //          image_scores[i].image_id, correspondence.weight);
-    //    }
   }
 
   return results;
@@ -517,7 +560,8 @@ void Database::doMapping() {
 bool Database::needToRecomputeSceneCoordinates() const {
   unsigned int num_saved_coords = 0;
   for (auto file : fs::recursive_directory_iterator(cachePath)) {
-    if (file.path().filename().string().find("sparse_scene_coords") != string::npos) {
+    if (file.path().filename().string().find("sparse_scene_coords") !=
+        string::npos) {
       num_saved_coords++;
     }
   }
@@ -557,7 +601,7 @@ int Database::computeDescriptorsForEachFrame(
         // careful: if we're only using keypoints detected by visual
         // odometry, some frames may have 0 keypoints (ie due to dropped
         // frames or mapping failure (even if it recovered in later frames))
-        SparseMat scene_coords = frame->loadSceneCoordinates();
+        SceneCoordinateMap scene_coords = frame->loadSceneCoordinates();
 
         with_depth->setCurrentSceneCoords(scene_coords);
       }
@@ -675,7 +719,8 @@ void Database::mergeCoobservedDescriptors(
     }
 
     // need: keypoint, scene coords, descriptors
-    SparseMat scene_coords_a = frames->find(a)->second->loadSceneCoordinates();
+    SceneCoordinateMap scene_coords_a =
+        frames->find(a)->second->loadSceneCoordinates();
 
     // first project a onto itself
     const vector<KeyPoint>& kpts_a = image_keypoints.find(a)->second;
@@ -685,7 +730,7 @@ void Database::mergeCoobservedDescriptors(
       pair<int, int> coord =
           make_pair(static_cast<int>(kpt.pt.y), static_cast<int>(kpt.pt.x));
       cv::Vec3f scene_coord(
-          scene_coords_a.value<cv::Vec3f>(coord.first, coord.second));
+          scene_coords_a.coords.at(make_pair(coord.first, coord.second)).coord);
       frames_to_coords_to_3dpt_and_descr_sums[a][coord] =
           make_tuple(scene_coord, descriptor.clone(), 1);
       frames_to_coords_to_orig_descr[a][coord] = descriptor;
@@ -710,7 +755,7 @@ void Database::mergeCoobservedDescriptors(
       }
 
       Frame* frame_b = frames->find(b)->second.get();
-      SparseMat scene_coords_b = frame_b->loadSceneCoordinates();
+      SceneCoordinateMap scene_coords_b = frame_b->loadSceneCoordinates();
       SE3 pose(frame_b->loadPose());
 
       int num_in_common = 0;
@@ -732,17 +777,17 @@ void Database::mergeCoobservedDescriptors(
         int u = static_cast<int>(round(local.x() / local.z() * fx + cx));
         int v = static_cast<int>(round(local.y() / local.z() * fy + cy));
 
-        if (u < 0 || v < 0 || u >= scene_coords_b.size(1) ||
-            v >= scene_coords_b.size(0)) {
+        if (u < 0 || v < 0 || u >= scene_coords_b.width ||
+            v >= scene_coords_b.height) {
           continue;
         }
 
-        uchar* ptr = scene_coords_b.ptr(v, u, false);
-        if (ptr == nullptr) {
+        auto b_coord_iter = scene_coords_b.coords.find(make_pair(v, u));
+        if (b_coord_iter == scene_coords_b.coords.end()) {
           continue;
         }
 
-        const cv::Vec3f scene_coord_b = scene_coords_b.value<cv::Vec3f>(v, u);
+        const cv::Vec3f scene_coord_b = b_coord_iter->second.coord;
         if (cv::norm(scene_coord_a - scene_coord_b) > 0.0001) {
           continue;
         }
@@ -779,7 +824,7 @@ void Database::mergeCoobservedDescriptors(
       tuple<cv::Vec3f, Mat, int>& scenecoord_descr_sum =
           element.second.at(coord);
       merged.row(k) = get<1>(scenecoord_descr_sum) /
-                   static_cast<float>(get<2>(scenecoord_descr_sum));
+                      static_cast<float>(get<2>(scenecoord_descr_sum));
     }
     frame->saveDescriptors(kpts, merged);
   }
@@ -792,7 +837,7 @@ void Database::doClustering(
     const map<int, map<int, Mat>>& image_descriptors,
     vector<reference_wrapper<Database>>& all_train_dbs) {
   if (!loadVocabulary(vocabulary)) {
-    int max_iters = 10;
+    int max_iters = 5;
     TermCriteria terminate_criterion(TermCriteria::MAX_ITER, max_iters, 0.0);
     BOWApproxKMeansTrainer bow_trainer(vocabulary_size, terminate_criterion);
 
@@ -828,7 +873,8 @@ map<int, vector<int>> Database::computeBowDescriptors(
   map<int, vector<int>> assignments;
   for (const auto& element : *frames) {
     int index = element.second->index;
-    if (trainOnFirstHalf && static_cast<unsigned int>(index) > frames->size() / 2) {
+    if (trainOnFirstHalf &&
+        static_cast<unsigned int>(index) > frames->size() / 2) {
       continue;
     }
 
@@ -932,18 +978,21 @@ MatrixXf Database::computeHammingThresholds(
             reinterpret_cast<float*>(descriptors.row(j).data), descriptor_size,
             1);
         proj = projection_matrix * descriptor;
-      } else if (descriptor_size == 32) {
+
+      } else if (descriptor_size >= 2 && descriptor_size < 128) {
         // not sure what to do if descriptor_size > 128
-        Map<Matrix<float, 32, 1>> descriptor(
-            reinterpret_cast<float*>(descriptors.row(j).data));
+        Map<MatrixXf> descriptor(
+            reinterpret_cast<float*>(descriptors.row(j).data), descriptor_size,
+            1);
 
         // just 0-pad the descriptor
         Eigen::Matrix<float, 128, 1> padded_descriptor;
-        padded_descriptor << descriptor, Eigen::Matrix<float, 96, 1>::Zero();
+        int padding = 128 - descriptor_size;
+        padded_descriptor << descriptor, Eigen::MatrixXf::Zero(padding, 1);
         proj = projection_matrix * padded_descriptor;
       } else {
         throw runtime_error(
-            "Only descriptors of size 128 and 32 are supported.");
+            "Only descriptors in size range [2, 128] are supported.");
       }
 
       for (int k = 0; k < 64; ++k) {
@@ -1112,17 +1161,17 @@ void Database::buildInvertedIndex(
         // :(
         if (descriptor_size == 128) {
           inverted_index.AddEntry(entry, closest_word, descriptor);
-        } else if (descriptor_size == 32) {
+        } else if (descriptor_size >= 2 && descriptor_size < 128) {
           // not sure what to do if descriptor_size > 128
 
           // just 0-pad the descriptor
           Eigen::Matrix<float, 128, 1> padded_descriptor;
-          padded_descriptor << descriptor, Eigen::Matrix<float, 96, 1>::Zero();
-
+          int padding = 128 - descriptor_size;
+          padded_descriptor << descriptor, Eigen::MatrixXf::Zero(padding, 1);
           inverted_index.AddEntry(entry, closest_word, padded_descriptor);
         } else {
           throw runtime_error(
-              "Only descriptors of size 128 and 32 are supported.");
+              "Only descriptors in size range [2, 128] are supported.");
         }
       }
     }
@@ -1177,11 +1226,11 @@ void Database::runVoAndComputeDescriptors() {
     cout << "Already have cached descriptors." << endl;
   }
 }
-void Database::assignAndBuildIndex(vector<reference_wrapper<Database>>& all_training_dbs) {
+void Database::assignAndBuildIndex(
+    vector<reference_wrapper<Database>>& all_training_dbs) {
   // Descriptors should have been computed as a precondition. Load them if we
   // haven't clustered the vocabulary yet, or if we need to compute word
   // assignments for the inverted index.
-
 
   map<int, map<int, vector<KeyPoint>>> image_keypoints;
   map<int, map<int, Mat>> image_descriptors;
@@ -1320,30 +1369,124 @@ const Mat Query::computeDescriptors() {
 
 const vector<KeyPoint>& Query::getKeypoints() const { return keypoints; }
 
-map<int, DMatch> doRatioTest(Mat query_descriptors, Mat db_descriptors,
-                             Ptr<DescriptorMatcher> matcher,
-                             double ratio_threshold, bool use_distance_threshold) {
-  map<int, DMatch> best_match_per_trainidx;
+map<int, list<DMatch>> doRatioTest(Mat query_descriptors, Mat db_descriptors,
+                                   Ptr<DescriptorMatcher> matcher,
+                                   double ratio_threshold,
+                                   bool use_distance_threshold) {
+  map<int, list<DMatch>> best_match_per_trainidx;
 
   vector<vector<DMatch>> first_two_nns;
-  matcher = cv::FlannBasedMatcher::create();
-  matcher->knnMatch(query_descriptors, db_descriptors, first_two_nns, 2);
 
-  for (vector<DMatch>& nn_matches : first_two_nns) {
-    if (nn_matches[0].distance < ratio_threshold * nn_matches[1].distance) {
-      auto iter = best_match_per_trainidx.find(nn_matches[0].trainIdx);
-      // could also do a ratio test in the other direction, but that
-      // would require more bookkeeping
-      if (iter == best_match_per_trainidx.end() ||
-          iter->second.distance > nn_matches[0].distance) {
-        // for the caffe descriptor, the margin for the hinge loss is set to
-        // 0.5. This makes a natural metric for detecting outliers.
-//        if (!use_distance_threshold || nn_matches[0].distance < 128.0) {
-          best_match_per_trainidx[nn_matches[0].trainIdx] = nn_matches[0];
-//        }
+  if (ratio_threshold > 1.0) {
+    // just return a bunch of stuff
+    // for convenience, interpret the threshold as the num nearest neighbors
+    matcher->knnMatch(query_descriptors, db_descriptors, first_two_nns,
+                      static_cast<int>(ratio_threshold));
+    for (vector<DMatch>& nn_matches : first_two_nns) {
+      for (auto& match : nn_matches) {
+        best_match_per_trainidx[match.trainIdx].push_back(match);
+      }
+    }
+  } else {
+    matcher->knnMatch(query_descriptors, db_descriptors, first_two_nns, 2);
+
+    for (vector<DMatch>& nn_matches : first_two_nns) {
+      if (nn_matches.size() < 2) {
+        continue;
+      }
+      if (nn_matches[0].distance < ratio_threshold * nn_matches[1].distance) {
+        auto iter = best_match_per_trainidx.find(nn_matches[0].trainIdx);
+        // could also do a ratio test in the other direction, but that
+        // would require more bookkeeping
+        if (iter == best_match_per_trainidx.end() ||
+            iter->second.front().distance > nn_matches[0].distance) {
+          // for the caffe descriptor, the margin for the hinge loss is set to
+          // 0.5. This makes a natural metric for detecting outliers.
+          //        if (!use_distance_threshold || nn_matches[0].distance < 128.0)
+          //        {
+          best_match_per_trainidx[nn_matches[0].trainIdx].clear();
+          best_match_per_trainidx[nn_matches[0].trainIdx].push_back(
+              nn_matches[0]);
+          //        }
+        }
+      }
+    }
+
+    // optional: also check the other direction
+    if (false) {
+      // this doesn't seem to work. not sure if there's a bug, or if the
+      // descriptors are just not very good.
+      matcher->knnMatch(db_descriptors, query_descriptors, first_two_nns, 1);
+      for (vector<DMatch>& nn_matches : first_two_nns) {
+        if (nn_matches.size() < 2) {
+          continue;
+        }
+        // the names are reversed, since we're checking the opposite direction
+        int testIdx1 = nn_matches[0].trainIdx;
+        int trainIdx1 = nn_matches[0].queryIdx;
+        float dist1 = nn_matches[0].distance;
+//        int testIdx2 = nn_matches[1].trainIdx;
+//        int trainIdx2 = nn_matches[1].queryIdx;
+        float dist2 = nn_matches[1].distance;
+
+        bool need_to_remove = false;
+        if (dist1 > ratio_threshold * dist2) {
+          // ratio test doesn't pass in the opposite direction
+          need_to_remove = true;
+        } else {
+          if (best_match_per_trainidx.find(trainIdx1) !=
+                  best_match_per_trainidx.end() &&
+              best_match_per_trainidx[trainIdx1].front().queryIdx != testIdx1) {
+            // a different point is the nearest neighbor
+            need_to_remove = true;
+
+            cout << "removing (" << trainIdx1 << "," << testIdx1 << ") <==> ("
+                 << trainIdx1 << ","
+                 << best_match_per_trainidx[trainIdx1].front().queryIdx
+                 << ") because ids don't match" << endl;
+          }
+        }
+
+        if (need_to_remove) {
+          best_match_per_trainidx.erase(trainIdx1);
+        }
       }
     }
   }
+
+  if (false) {
+    // retain top percentile only
+    vector<float> distances;
+    for (auto& matchlist : best_match_per_trainidx) {
+      for (auto& match : matchlist.second) {
+        distances.push_back(match.distance);
+      }
+    }
+    cout << "match count before percentile thresholding: " << distances.size()
+         << endl;
+    sort(distances.begin(), distances.end());
+    float fraction_to_keep = 0.5;
+    float threshold =
+        distances[static_cast<int>(fraction_to_keep * distances.size())];
+    for (auto match_map_iter = best_match_per_trainidx.begin();
+         match_map_iter != best_match_per_trainidx.end();) {
+      list<DMatch>& matchlist = match_map_iter->second;
+      for (auto match_list_iter = matchlist.cbegin();
+           match_list_iter != matchlist.cend();) {
+        if (match_list_iter->distance > threshold) {
+          matchlist.erase(match_list_iter++);
+        } else {
+          ++match_list_iter;
+        }
+      }
+      if (matchlist.empty()) {
+        best_match_per_trainidx.erase(match_map_iter++);
+      } else {
+        ++match_map_iter;
+      }
+    }
+  }
+
   return best_match_per_trainidx;
 }
 

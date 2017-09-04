@@ -37,6 +37,11 @@ namespace sdl {
 bool print_debug_info = false;
 bool enable_viewer = true;
 
+bool saveVariance = false;
+// skip map generation. This can be used to estimate high-gradient locations in
+// test sets, but not the depth or pose.
+bool skipDso = true;
+
 /*
  * Allows you to read from a TUM monoVO dataset using DSO's ImageFolderReader
  */
@@ -159,13 +164,13 @@ struct DsoOutputRecorder : public Output3DWrapper {
             Eigen::aligned_allocator<pair<uint64_t, Eigen::Vector2i>>>*
       latestConnectivity;
   unique_ptr<map<int, int>> frameIdToIncomingId;
-  unique_ptr<map<int, list<Vec3>>> covisibleMarginalizedPoints;
+  unique_ptr<map<int, list<SceneCoord>>> covisibleMarginalizedPoints;
   CalibHessian* latestCalibHessian;
   bool saveNonKeyFramesForTesting;
   set<int> removeSceneCoordIfKeyframe;
 
-  const double my_scaledTH = 100;      // 1e10;
-  const double my_absTH = 100;         // 1e10;
+  const double my_scaledTH = 100;     // 1e10;
+  const double my_absTH = 100;        // 1e10;
   const double my_minRelBS = 0.0005;  // 0;
 
   DsoOutputRecorder()
@@ -178,7 +183,7 @@ struct DsoOutputRecorder : public Output3DWrapper {
         sceneCoordinateMaps(new map<int, SceneCoordinateMap>()),
         latestConnectivity(nullptr),
         frameIdToIncomingId(new map<int, int>()),
-        covisibleMarginalizedPoints(new map<int, list<Vec3>>()),
+        covisibleMarginalizedPoints(new map<int, list<SceneCoord>>()),
         latestCalibHessian(nullptr),
         saveNonKeyFramesForTesting(false) {}
 
@@ -295,9 +300,23 @@ struct DsoOutputRecorder : public Output3DWrapper {
         coloredPoints->push_back(make_pair(point3_world, color));
         current_points->push_back(make_pair(point3_cam, color));
 
+        float inv_depth = point->idepth;
+        // TODO: is this true, or is it an approximation? For a gaussian
+        // random variable, is there a relationship between its covariance and
+        // the hessian you get when estimating its parameters?
+        float inv_var = 1.0 / (point->idepth_hessian + 1e-4);
+
+        SceneCoord coord;
+        if (sdl::saveVariance) {
+          coord = SceneCoord(
+              cv::Vec3f(point3_world.x(), point3_world.y(), point3_world.z()), inv_depth, inv_var, camToWorld);
+        } else {
+          coord = SceneCoord(
+              cv::Vec3f(point3_world.x(), point3_world.y(), point3_world.z()));
+        }
         sceneCoordMap.coords.insert(make_pair(
             make_pair(static_cast<int>(point->v), static_cast<int>(point->u)),
-            cv::Vec3f(point3_world.x(), point3_world.y(), point3_world.z())));
+            coord));
 
         // also project into frames with known covisibility
         for (PointFrameResidual* residual : point->residuals) {
@@ -318,10 +337,18 @@ struct DsoOutputRecorder : public Output3DWrapper {
           if (iter == covisibleMarginalizedPoints->end()) {
             iter = covisibleMarginalizedPoints
                        ->insert(make_pair(residual->targetIncomingId,
-                                          list<Vec3>()))
+                                          list<SceneCoord>()))
                        .first;
           }
-          iter->second.push_back(point3_world);
+          if (saveVariance) {
+            coord = SceneCoord(
+                cv::Vec3f(point3_world.x(), point3_world.y(), point3_world.z()),
+                inv_depth, inv_var, camToWorld);
+          } else {
+            coord = SceneCoord(cv::Vec3f(point3_world.x(), point3_world.y(),
+                                         point3_world.z()));
+          }
+          iter->second.push_back(coord);
 
           // Here would be a good place to verify that all frames in
           // point.residuals are listed as covisible with each other
@@ -359,6 +386,13 @@ struct DsoOutputRecorder : public Output3DWrapper {
       }
       rgbImagesById->insert(make_pair(fh->shell->incoming_id, move(image)));
       (*frameIdToIncomingId)[fh->frameID] = fh->shell->incoming_id;
+    } else {
+      // TODO: At this point, at least one round of optimization has occured.
+      // Ergo, each frame has a list of point hessians, and some outliers have
+      // probably been removed. However, later some points will be marginalized,
+      // and we will never again have access to this residual list; therefore,
+      // now would be a good chance to record all the residuals so we can
+      // re-compose them later.
     }
     latestCalibHessian = HCalib;
   }
@@ -390,8 +424,13 @@ struct DsoOutputRecorder : public Output3DWrapper {
           // the difference doesn't really matter for us.
 
           float nan = numeric_limits<float>::quiet_NaN();
-          scene_coord_map.coords.insert(
-              make_pair(make_pair(y, x), cv::Vec3f(nan, nan, nan)));
+          SceneCoord coord;
+          if (saveVariance) {
+            coord = SceneCoord(cv::Vec3f(nan, nan, nan), nan, nan, SE3());
+          } else {
+            coord = SceneCoord(cv::Vec3f(nan, nan, nan));
+          }
+          scene_coord_map.coords.insert(make_pair(make_pair(y, x), coord));
         }
       }
 
@@ -500,15 +539,15 @@ DsoMapGenerator::DsoMapGenerator(const string& input_path) {
 DsoMapGenerator::DsoMapGenerator(const string& image_path, const string& calib_path,
                                  bool save_non_keyframes_for_testing) {
   // NOTE: this is the default for cambridge
-  setting_desiredImmatureDensity = 5000;
-  setting_desiredPointDensity = 4000;
+  setting_desiredImmatureDensity = 20000;
+  setting_desiredPointDensity = 16000;
   // setting this higher than 1 forces more frames to be keyframes. Still, many
   // frames are skipped for a variety of reasons. The most common is probably no
   // camera movement / ill-conditioned depth estimation.
   setting_kfGlobalWeight = 1;
   setting_makeAllKFs = false;
   setting_minFrames = 5;
-  setting_maxFrames = 30;
+  setting_maxFrames = 7;
   setting_maxOptIterations = 10;
   setting_minOptIterations = 1;
   setting_realTimeMaxKF = true;
@@ -518,11 +557,11 @@ DsoMapGenerator::DsoMapGenerator(const string& image_path, const string& calib_p
   // Also track more points accross wide rotations/
   setting_minGradHistAdd = 7.0;
   setting_maxPixSearch = 0.2;
-  setting_minPointsRemaining = 0.001;
+  setting_minPointsRemaining = 0.01;
   settings_timestepsToRetainUnobservedPts = 50;
   setting_trace_stepsize = 2.0;
   setting_minTraceQuality = 3.0; // min threshold ratio of best energy on epipolar line to second best
-  setting_maxLogAffFacInWindow = 3.0;
+  setting_maxLogAffFacInWindow = 1.5;
 
 //  setting_coarseCutoffTH = 40;
 
@@ -554,20 +593,20 @@ DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, int width, int height,
                                  const string& cache_path,
                                  bool save_non_keyframes_for_testing) {
   // NOTE: this is the default for 7scenes
-  setting_desiredImmatureDensity = 5000;
-  setting_desiredPointDensity = 4000;
+  setting_desiredImmatureDensity = 20000;
+  setting_desiredPointDensity = 16000;
   // setting this higher than 1 forces more frames to be keyframes. Still, many
   // frames are skipped for a variety of reasons. The most common is probably no
   // camera movement / ill-conditioned depth estimation.
   setting_kfGlobalWeight = 1;
   setting_makeAllKFs = false;
   setting_minFrames = 5;
-  setting_maxFrames = 20;
+  setting_maxFrames = 7;
   setting_maxOptIterations = 6;
   setting_minOptIterations = 1;
   setting_realTimeMaxKF = true;
 
-  settings_timestepsToRetainUnobservedPts = 100;
+  settings_timestepsToRetainUnobservedPts = 50;
 
   saveNonKeyFramesForTesting = save_non_keyframes_for_testing;
 
@@ -575,7 +614,7 @@ DsoMapGenerator::DsoMapGenerator(cv::Mat camera_calib, int width, int height,
 
   disableAllDisplay = !enable_viewer;
 
-  setting_debugout_runquiet = false;
+  setting_debugout_runquiet = true;
 
   // to handle datasets other than tum monoVO, we'll need to change these
   // paths, and change the mode and photometric calibration weights
@@ -626,6 +665,8 @@ void DsoMapGenerator::runVisualOdometry(
     // if not initialized: reset start time.
     if (!fullSystem->initialized) {
       started = clock();
+    } else if (skipDso && saveNonKeyFramesForTesting) {
+      break;
     }
 
     int id = ids_to_play[i];
@@ -691,6 +732,70 @@ void DsoMapGenerator::runVisualOdometry(
         MilliSecondsTakenSingle / numFramesProcessed);
   }
 
+  if (saveNonKeyFramesForTesting) {
+    // Frames used in the initializer are also dropped
+    // Extract the maps for them, too, (even though we have no possible way to
+    // get the pose)
+    for (int i = 0; i < static_cast<int>(ids_to_play.size()); i++) {
+      int id = ids_to_play[i];
+      bool has_scene_coords = dso_recorder->sceneCoordinateMaps->find(id) !=
+                              dso_recorder->sceneCoordinateMaps->end();
+      bool has_pose =
+          dso_recorder->posesById->find(id) != dso_recorder->posesById->end();
+      if (has_pose && has_scene_coords) {
+        continue;
+      }
+      if (!has_pose) {
+        // default: just insert identity pose
+        SE3 pose;
+        if (pose_loader) {
+          unique_ptr<SE3> from_loader(pose_loader(id));
+          if (from_loader) {
+            pose = *from_loader;
+          }
+        }
+        dso_recorder->posesById->insert(make_pair(id, pose));
+      }
+      if (!has_scene_coords) {
+        unique_ptr<FrameHessian> fh(new FrameHessian());
+        unique_ptr<ImageAndExposure> img(datasetReader->getImage(id));
+        fh->makeImages(img->image, dso_recorder->latestCalibHessian);
+
+        PixelSelector selector(wG[0], hG[0]);
+        selector.currentPotential = 3;
+        vector<float> map_out(wG[0] * hG[0]);
+
+        selector.makeMaps(fh.get(), &map_out[0],
+                          setting_desiredImmatureDensity);
+
+        SceneCoordinateMap scene_coord_map(hG[0], wG[0]);
+        for (int y = patternPadding + 1; y < hG[0] - patternPadding - 2; y++) {
+          for (int x = patternPadding + 1; x < wG[0] - patternPadding - 2;
+               x++) {
+            int i = x + y * wG[0];
+            if (map_out[i] == 0) continue;
+
+            // map_out[i] contains 1, 2, or 3. 1 is the best, 3 is the worst,
+            // but
+            // the difference doesn't really matter for us.
+
+            float nan = numeric_limits<float>::quiet_NaN();
+            SceneCoord coord;
+            if (saveVariance) {
+              coord = SceneCoord(cv::Vec3f(nan, nan, nan), nan, nan, SE3());
+            } else {
+              coord = SceneCoord(cv::Vec3f(nan, nan, nan));
+            }
+            scene_coord_map.coords.insert(make_pair(make_pair(y, x), coord));
+          }
+        }
+
+        dso_recorder->sceneCoordinateMaps->insert(
+            make_pair(id, scene_coord_map));
+      }
+    }
+  }
+
   pointcloud = move(dso_recorder->coloredPoints);
   pointcloudsWithViewpoints = move(dso_recorder->pointsWithViewpointsById);
   depthImages = move(dso_recorder->depthImagesById);
@@ -753,10 +858,11 @@ void DsoMapGenerator::runVisualOdometry(
       SceneCoordinateMap& scene_coords = scene_coord_iter->second;
       SE3 world_to_cam = pose_iter->second.inverse();
 
-      for (Vec3& point : iter->second) {
+      for (SceneCoord& coord : iter->second) {
         // We could perform the same checks as in addPoints, but ostensibly
         // these points have already been verified by DSO
 
+        Vec3 point(coord.coord[0], coord.coord[1], coord.coord[2]);
         // do camera projection
         auto local = world_to_cam * point;
         int u = static_cast<int>(round(local.x() / local.z() * fx + cx));
@@ -767,10 +873,10 @@ void DsoMapGenerator::runVisualOdometry(
           continue;
         }
 
+        // don't overwrite earlier points
         if (scene_coords.coords.find(make_pair(v, u)) ==
             scene_coords.coords.end()) {
-          scene_coords.coords.insert(make_pair(
-              make_pair(v, u), cv::Vec3f(point.x(), point.y(), point.z())));
+          scene_coords.coords.insert(make_pair(make_pair(v, u), coord));
         }
       }
     }

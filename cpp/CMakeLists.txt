@@ -196,14 +196,22 @@ add_test(TestApproxKmeans test_approx_kmeans)
 
 add_executable(test_caffe_descriptor
     src/CaffeDescriptor.h
+    src/MapGenerator.h
+    src/CaffeDescriptor.h
     
+    src/MapGenerator.cpp
     src/CaffeDescriptor.cpp
     test/test_caffe_descriptor.cpp
 )
 target_link_libraries(test_caffe_descriptor
+    ${DSO_LIBRARY}
+    ${LIBZIP_LIBRARY}
     ${OpenCV_LIBS}
     boost_filesystem
+    ${PCL_COMMON_LIBRARIES}
+    ${PCL_IO_LIBRARIES}
     ${Caffe_LIBRARIES}
+    ${Pangolin_LIBRARIES} 
 )
 add_test(TestCaffeDescriptor test_caffe_descriptor)
 

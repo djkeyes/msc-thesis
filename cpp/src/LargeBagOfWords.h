@@ -1,6 +1,8 @@
 #ifndef SRC_LARGEBAGOFWORDS_H_
 #define SRC_LARGEBAGOFWORDS_H_
 
+#include <vector>
+
 #include "opencv2/features2d.hpp"
 
 namespace cv {
@@ -12,32 +14,35 @@ namespace cv {
  *
  * This code is largely based on the OpenCV BOWKMeansTrainer.
  */
-class CV_EXPORTS_W BOWApproxKMeansTrainer: public BOWKMeansTrainer {
-public:
-	CV_WRAP	BOWApproxKMeansTrainer(int clusterCount, const TermCriteria& termcrit =
-			TermCriteria(), int attempts = 3, int flags = KMEANS_RANDOM_CENTERS);
-	virtual ~BOWApproxKMeansTrainer();
+class CV_EXPORTS_W BOWApproxKMeansTrainer : public BOWKMeansTrainer {
+ public:
+  CV_WRAP BOWApproxKMeansTrainer(int clusterCount,
+                                 const TermCriteria& termcrit = TermCriteria(),
+                                 int attempts = 1,
+                                 int flags = KMEANS_RANDOM_CENTERS);
+  virtual ~BOWApproxKMeansTrainer();
 
-	// Returns trained vocabulary (i.e. cluster centers).
-	CV_WRAP virtual Mat cluster() const;
-	CV_WRAP	virtual Mat cluster(const Mat& descriptors) const;
+  // Returns trained vocabulary (i.e. cluster centers).
+  CV_WRAP virtual Mat cluster() const;
+  CV_WRAP virtual Mat cluster(const Mat& descriptors) const;
 };
 
-class CV_EXPORTS_W BOWSparseImgDescriptorExtractor : public BOWImgDescriptorExtractor{
+class CV_EXPORTS_W BOWSparseImgDescriptorExtractor
+    : public BOWImgDescriptorExtractor {
+ public:
+  CV_WRAP BOWSparseImgDescriptorExtractor(
+      const Ptr<DescriptorExtractor>& dextractor,
+      const Ptr<DescriptorMatcher>& dmatcher);
+  virtual ~BOWSparseImgDescriptorExtractor();
 
-public:
-    CV_WRAP BOWSparseImgDescriptorExtractor( const Ptr<DescriptorExtractor>& dextractor,
-                               const Ptr<DescriptorMatcher>& dmatcher );
-    virtual ~BOWSparseImgDescriptorExtractor();
-
-    /*
-         * Compute a bag of words descriptor, and return it as a collection of
-         * nearest neighbor assignments. For a visual vocabulary of K words and
-         * images with N descriptors, this is efficient when N << K.
-         */
-    void computeAssignments(InputArray keypointDescriptors,
-                            std::vector<std::vector<int>>& assignmentsOut,
-                            int num_nearest_neighbors = 1);
+  /*
+       * Compute a bag of words descriptor, and return it as a collection of
+       * nearest neighbor assignments. For a visual vocabulary of K words and
+       * images with N descriptors, this is efficient when N << K.
+       */
+  void computeAssignments(InputArray keypointDescriptors,
+                          std::vector<std::vector<int>>& assignmentsOut,
+                          int num_nearest_neighbors = 1);
 };
 }
 

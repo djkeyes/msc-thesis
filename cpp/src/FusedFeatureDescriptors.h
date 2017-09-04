@@ -6,6 +6,8 @@
 #include "opencv2/core/mat.hpp"
 #include "opencv2/features2d.hpp"
 
+#include "MapGenerator.h"
+
 namespace sdl {
 /*
  * Feature detector that allows users to specify an associated map of per-pixel
@@ -15,12 +17,12 @@ class SceneCoordFeatureDetector : public cv::Feature2D {
  public:
   virtual ~SceneCoordFeatureDetector() = default;
 
-  void setCurrentSceneCoords(cv::SparseMat cur_scene_coords) {
+  void setCurrentSceneCoords(SceneCoordinateMap cur_scene_coords) {
     curSceneCoords = cur_scene_coords;
   }
 
  protected:
-  cv::SparseMat curSceneCoords;
+  SceneCoordinateMap curSceneCoords;
 };
 
 /*

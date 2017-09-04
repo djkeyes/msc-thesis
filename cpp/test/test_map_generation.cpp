@@ -20,13 +20,14 @@ using namespace std;
  */
 
 void test_scene_coordinates_have_valid_projection(
-    const sdl::SceneCoordinateMap& scene_coords, const dso::SE3& pose, cv::Mat K) {
+    const sdl::SceneCoordinateMap& scene_coords, const dso::SE3& pose,
+    cv::Mat K) {
   assert(scene_coords.coords.size() > 0);
   for (const auto& element : scene_coords.coords) {
     int row = element.first.first;
     int col = element.first.second;
 
-    cv::Vec3f point_cv = element.second;
+    cv::Vec3f point_cv = element.second.coord;
     dso::Vec3 world_point(point_cv[0], point_cv[1], point_cv[2]);
 
     // we could use pose.invere() * world_point directly, but this demonstrates
@@ -71,34 +72,32 @@ class FrameCleanup {
  private:
   const sdl::Frame& f_;
 };
-void test_load_scene_coordinates_from_save(const sdl::Frame& f,
-                                           const sdl::SceneCoordinateMap& scene_coords) {
+void test_load_scene_coordinates_from_save(
+    const sdl::Frame& f, const sdl::SceneCoordinateMap& scene_coords) {
   FrameCleanup fc(f);
 
   f.saveSceneCoordinates(scene_coords);
-//  sdl::SceneCoordinateMap loaded = f.loadSceneCoordinates();
-//
-  // need to change signature of loadSceneCoordinates
-  assert(false);
-//  assert(loaded.dims() == scene_coords.dims());
-//  assert(loaded.dims() == 2);
-//  for (int i = 0; i < loaded.dims(); ++i) {
-//    assert(loaded.size(i) == scene_coords.size(i));
-//  }
-//
-//  for (int row = 0; row < loaded.size(0); ++row) {
-//    for (int col = 0; col < loaded.size(1); ++col) {
-//      for (int channel = 0; channel < 3; ++channel) {
-//        assert(loaded.value<cv::Vec3f>(row, col).val[channel] ==
-//               scene_coords.value<cv::Vec3f>(row, col).val[channel]);
-//      }
-//    }
-//  }
+  sdl::SceneCoordinateMap loaded = f.loadSceneCoordinates();
+
+  assert(loaded.width == scene_coords.width &&
+         loaded.height == scene_coords.height);
+  for (int row = 0; row < loaded.height; ++row) {
+    for (int col = 0; col < loaded.width; ++col) {
+      if (loaded.coords.find(make_pair(row, col)) == loaded.coords.end()) {
+        assert(scene_coords.coords.find(make_pair(row, col)) ==
+               scene_coords.coords.end());
+        continue;
+      }
+      for (int channel = 0; channel < 3; ++channel) {
+        assert(loaded.coords.at(make_pair(row, col)).coord[channel] ==
+               scene_coords.coords.at(make_pair(row, col)).coord[channel]);
+      }
+    }
+  }
 }
 
 bool test_map_generation(const string& data_dir, const string& cache_dir) {
-  unique_ptr<sdl::TumParser> parser(
-      new sdl::TumParser(data_dir));
+  unique_ptr<sdl::TumParser> parser(new sdl::TumParser(data_dir));
   parser->setCache(cache_dir);
 
   vector<sdl::Database> dbs;

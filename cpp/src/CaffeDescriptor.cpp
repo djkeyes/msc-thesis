@@ -87,9 +87,10 @@ DenseDescriptorFromCaffe::DenseDescriptorFromCaffe(
       break;
     }
   }
+  outputSize = outputBlob->channels();
 }
 int DenseDescriptorFromCaffe::descriptorSize() const {
-  return outputBlob->channels();
+  return outputSize;
 }
 
 void DenseDescriptorFromCaffe::detectAndCompute(cv::InputArray image,
@@ -97,16 +98,15 @@ void DenseDescriptorFromCaffe::detectAndCompute(cv::InputArray image,
                                                 vector<cv::KeyPoint>& keypoints,
                                                 cv::OutputArray descriptors,
                                                 bool useProvidedKeypoints) {
-  if (curSceneCoords.nzcount() == 0) {
+  if (curSceneCoords.coords.size() == 0) {
     return;
   }
 
   if (!useProvidedKeypoints) {
     keypoints.clear();
-    for (auto iter = curSceneCoords.begin(); iter != curSceneCoords.end();
-         ++iter) {
-      int y = iter.node()->idx[0];
-      int x = iter.node()->idx[1];
+    for (const auto& element : curSceneCoords.coords) {
+      int y = element.first.first;
+      int x = element.first.second;
       KeyPoint kpt;
       kpt.pt.x = x;
       kpt.pt.y = y;
@@ -144,4 +144,5 @@ void DenseDescriptorFromCaffe::detectAndCompute(cv::InputArray image,
     }
   }
 }
+
 }  // namespace sdl
