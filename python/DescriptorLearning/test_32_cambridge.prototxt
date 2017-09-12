@@ -1,16 +1,16 @@
 name: "denseCorrespondence-M0p5-P1-N1"
-#layer {
-#  name: "image_data"
-#  type: "MemoryData"
-#  top: "data"
-#  top: "ignore1"
-#  memory_data_param {
-#    batch_size: 2
-#    channels: 3
-#    height: 480
-#    width: 640
-#  }
-#}
+layer {
+  name: "image_data"
+  type: "MemoryData"
+  top: "data"
+  top: "ignore1"
+  memory_data_param {
+    batch_size: 1
+    channels: 3
+    height: 416
+    width: 768
+  }
+}
 #layer {
 #  name: "vertex_data"
 #  type: "MemoryData"
@@ -36,19 +36,18 @@ name: "denseCorrespondence-M0p5-P1-N1"
 #  }
 #}
 
-layer {
-  name: "image_vertex_and_transform_data"
-  type: "Python"
-  top: "data"
-  top: "vertex_data"
-  top: "transform_data"
-  python_param {
-    module: "input_preprocessor"
-    layer: "ImageVertexTransformLayer"
+#layer {
+#  name: "image_vertex_and_transform_data"
+#  type: "Python"
+#  top: "data"
+#  top: "vertex_data"
+#  top: "transform_data"
+#  python_param {
+#    module: "input_preprocessor"
+#    layer: "ImageVertexTransformLayer"
 #    param_str: "/home/daniel/data/tmp/tum-descriptors-labscene/"
-    param_str: "/home/daniel/data/tmp/fire/"
-  }
-}
+#  }
+#}
 
 # ------------------------------------------------- #
 
@@ -736,7 +735,7 @@ layer {
     decay_mult: 0
   }
   convolution_param {
-    num_output: 3 #C-HOOK
+    num_output: 32 #C-HOOK
     kernel_size: 1
     stride: 1
     weight_filler {
@@ -766,7 +765,7 @@ layer {
     decay_mult: 0
   }
   convolution_param {
-    num_output: 3 #C-HOOK
+    num_output: 32 #C-HOOK
     kernel_size: 4
     stride: 2
     pad: 1
@@ -797,7 +796,7 @@ layer {
     decay_mult: 0
   }
   convolution_param {
-    num_output: 3 #C-HOOK
+    num_output: 32 #C-HOOK
     kernel_size: 1
     stride: 1
     weight_filler {
@@ -855,7 +854,7 @@ layer {
     decay_mult: 0
   }
   convolution_param {
-    num_output: 3 #C-HOOK
+    num_output: 32 #C-HOOK
     kernel_size: 4
     stride: 2
     pad: 1
@@ -886,7 +885,7 @@ layer {
     decay_mult: 0
   }
   convolution_param {
-    num_output: 3 #C-HOOK
+    num_output: 32 #C-HOOK
     kernel_size: 1
     stride: 1
     weight_filler {
@@ -944,7 +943,7 @@ layer {
     decay_mult: 0
   }
   convolution_param {
-    num_output: 3 #C-HOOK
+    num_output: 32 #C-HOOK
     kernel_size: 16
     stride: 8
     pad: 4
@@ -973,63 +972,59 @@ layer {
 
 # ------------------------------------------------- #
 
-layer {
-  name: "slice_feats"
-  type: "Slice"
-  bottom: "upsample_1"
-  top: "featA"
-  top: "featB"
-  slice_param {
-    slice_dim: 0
-    slice_point: 1
-  }
-}
+#layer {
+#  name: "slice_feats"
+#  type: "Slice"
+#  bottom: "upsample_1"
+#  top: "featA"
+#  top: "featB"
+#  slice_param {
+#    slice_dim: 0
+#    slice_point: 1
+#  }
+#}
 
-layer {
-  name: "slice_verts"
-  type: "Slice"
-  bottom: "vertex_data"
-  top: "vertsA"
-  top: "vertsB"
-  slice_param {
-    slice_dim: 0
-    slice_point: 1
-  }
-}
+#layer {
+#  name: "slice_verts"
+#  type: "Slice"
+#  bottom: "vertex_data"
+#  top: "vertsA"
+#  top: "vertsB"
+#  slice_param {
+#    slice_dim: 0
+#    slice_point: 1
+#  }
+#}
 
-layer {
-  name: "loss"
-  type: "DenseCorrespondence"
-  bottom: "featA"
-  bottom: "featB"
-  bottom: "vertsA"
-  bottom: "vertsB"
-  bottom: "transform_data"
-  top:    "loss"
-  loss_weight: 1.0
-  dense_correspondence_param {
+#layer {
+#  name: "loss"
+#  type: "DenseCorrespondence"
+#  bottom: "featA"
+#  bottom: "featB"
+#  bottom: "vertsA"
+#  bottom: "vertsB"
+#  bottom: "transform_data"
+#  top:    "loss"
+#  loss_weight: 1.0
+#  dense_correspondence_param {
 #    focal_length_x: 277.34
 #    focal_length_y: 291.402
 #    principal_point_x: 312.234
 #    principal_point_y: 239.777
-    focal_length_x: 533.377
-    focal_length_y: 535.726
-    principal_point_x: 311.928
-    principal_point_y: 243.044
-    positive_selection: ALL_POSITIVES
-    positive_samples: 5000 #100
-    negative_selection: RANDOM_NEGATIVES
-    negative_samples: 100 #4
-#    mining_samples: 100 #20
-    loss_balancing: REWEIGHTED_UNIFORM
-    positive_weight: 1.0
-    negative_weight: 1.0
-    enable_matchless: false #true
-    positive_loss: L2
-    negative_loss: HINGE
-    margin: 0.5
-  }
-}
+#    positive_selection: ALL_POSITIVES
+#    positive_samples: 5000 #100
+#    negative_selection: RANDOM_NEGATIVES
+#    negative_samples: 100 #4
+##    mining_samples: 100 #20
+#    loss_balancing: REWEIGHTED_UNIFORM
+#    positive_weight: 1.0
+#    negative_weight: 1.0
+#    enable_matchless: false #true
+#    positive_loss: L2
+#    negative_loss: HINGE
+#    margin: 0.5
+#  }
+#}
 
 
 # ------------------------------------------------- #

@@ -46,7 +46,9 @@ layer {
     module: "input_preprocessor"
     layer: "ImageVertexTransformLayer"
 #    param_str: "/home/daniel/data/tmp/tum-descriptors-labscene/"
-    param_str: "/home/daniel/data/tmp/fire/"
+#    param_str: "/home/daniel/data/tmp/fire/"
+#    param_str: "/home/daniel/data/tmp/greatcourt-caffe/"
+    param_str: "/home/daniel/data/tmp/greatcourt/"
   }
 }
 
@@ -1012,10 +1014,10 @@ layer {
 #    focal_length_y: 291.402
 #    principal_point_x: 312.234
 #    principal_point_y: 239.777
-    focal_length_x: 533.377
-    focal_length_y: 535.726
-    principal_point_x: 311.928
-    principal_point_y: 243.044
+    focal_length_x: 691.2
+    focal_length_y: 691.2
+    principal_point_x: 383.5
+    principal_point_y: 207.5
     positive_selection: ALL_POSITIVES
     positive_samples: 5000 #100
     negative_selection: RANDOM_NEGATIVES
