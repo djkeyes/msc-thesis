@@ -38,13 +38,14 @@ namespace sdl {
 
 bool use_second_best_for_debugging = false;
 bool save_first_trajectory = true;
-bool display_top_matching_images = false;
-bool display_stereo_correspondences = false;
+bool display_top_matching_images = true;
+bool display_stereo_correspondences = true;
 bool use_5pt_for_verif = false;  // true: 5pt essential mat. false: 4pt PnP
 
 int ransac_num_iters = 10000;  // 500;
 double ransac_confidence = 0.999999;  // 0.999;
-double ransac_threshold = 8.0;
+double ransac_threshold = 8.0;  // 8.0;
+int ransac_batch_size = 500;
 
 int vocabulary_size;
 double epsilon_angle_deg;
@@ -59,6 +60,186 @@ bool seed_ground_truth_poses;
 
 unique_ptr<SceneParser> scene_parser;
 
+void solvePnP(const vector<cv::Point3f>& scene_points,
+              const vector<cv::Point2f>& query_points, Mat K, Mat& rvec, Mat& t,
+              bool use_iterative_refinement) {
+  cv::solvePnP(scene_points, query_points, K, noArray(), rvec, t, false,
+               cv::SOLVEPNP_EPNP);
+  if (use_iterative_refinement) {
+    cv::solvePnP(scene_points, query_points, K, noArray(), rvec, t, true,
+                 cv::SOLVEPNP_ITERATIVE);
+  }
+}
+void solvePnPRansac(const vector<cv::Point3f>& scene_points,
+                    const vector<cv::Point2f>& query_points, Mat K, Mat& rvec,
+                    Mat& t, int max_iters, float threshold, float confidence,
+                    Mat& inliers, bool use_iterative_refinement) {
+  int flag = SOLVEPNP_EPNP;
+  if (use_iterative_refinement) {
+    // this only applies to the final pose. the initial guesses from ransac are
+    // all estimated with EPnP.
+    flag = SOLVEPNP_ITERATIVE;
+  }
+  cv::solvePnPRansac(scene_points, query_points, K, noArray(), rvec, t, false,
+                     max_iters, threshold, confidence, inliers, flag);
+}
+// Perform RANSAC on incrementally larger subsets of the correspondences, as in
+// Schmidt et al.
+void solvePreemptivePnPRansac(const vector<cv::Point3f>& scene_points,
+                              const vector<cv::Point2f>& query_points, Mat K,
+                              Mat& _rvec, Mat& _t, int num_hypotheses, int batch_size, float threshold,
+                              Mat& _inliers, bool use_iterative_refinement) {
+  std::mt19937 rng;
+
+  vector<int> indices(scene_points.size());
+  for (int i = 0; i < static_cast<int>(scene_points.size()); ++i) {
+    indices[i] = i;
+  }
+  std::shuffle(indices.begin(), indices.end(), rng);
+
+  // Note: in Schmidt et al., they specifically enforced a 1-1 correspondence by
+  // picking the correspondence with smallest reprojection error during RANSAC.
+  // We could do this, too, by checking which query_points are identical--or by
+  // requiring users to pass us a map<int, list<int>> instead.
+
+  // sample some initial hypotheses
+  // <rvec, t, inliers>
+  vector<tuple<Mat, Mat, Mat>> hypotheses;
+  hypotheses.reserve(num_hypotheses);
+  std::uniform_int_distribution<int> uniform(0, indices.size() - 1);
+  for (int i = 0; i < num_hypotheses; ++i) {
+    // it would be nice to do some kind of adaptation of a fisher-yates shuffle
+    // but this is still fine for small n
+    set<int> sample_indices;
+    while (sample_indices.size() < 5) {
+      int idx = uniform(rng);
+      if (sample_indices.find(idx) != sample_indices.end()) {
+        continue;
+      }
+      sample_indices.insert(idx);
+    }
+    vector<cv::Point3f> minimal_scene_points;
+    vector<cv::Point2f> minimal_query_points;
+    for (int j : sample_indices) {
+      minimal_scene_points.push_back(scene_points[j]);
+      minimal_query_points.push_back(query_points[j]);
+    }
+    Mat rvec(3, 1, CV_32F);
+    Mat t(3, 1, CV_32F);
+    solvePnP(minimal_scene_points, minimal_query_points, K, rvec, t, false);
+//    solvePnP(minimal_scene_points, minimal_query_points, K, rvec, t, true);
+
+    // for good measure, also add these points to the inliers
+    Mat inliers(0, 1, CV_32S);
+    for (auto index : sample_indices) {
+      inliers.push_back(index);
+    }
+    hypotheses.push_back(make_tuple(rvec, t, inliers));
+  }
+
+  int offset = 0;
+  while (hypotheses.size() > 1) {
+    vector<cv::Point3f> next_sampled_scene_points;
+    vector<cv::Point2f> next_sampled_query_points;
+    next_sampled_scene_points.reserve(batch_size);
+    next_sampled_query_points.reserve(batch_size);
+    vector<int> orig_idx;
+    for (int i = 0; i < batch_size; ++i) {
+      if (offset + i >= static_cast<int>(indices.size())) {
+        break;
+      }
+      int shuffled_idx = indices[offset + i];
+      next_sampled_scene_points.push_back(scene_points[shuffled_idx]);
+      next_sampled_query_points.push_back(query_points[shuffled_idx]);
+      orig_idx.push_back(offset + i);
+    }
+    offset += batch_size;
+
+    // only check for new inliers if we haven't run out of samples so far
+    if (next_sampled_query_points.size() > 0) {
+      // count new inliers
+      for (unsigned int i = 0; i < hypotheses.size(); ++i) {
+        Mat rvec = std::get<0>(hypotheses[i]);
+        Mat t = std::get<1>(hypotheses[i]);
+        Mat inliers = std::get<2>(hypotheses[i]);
+        vector<cv::Point2f> projected;
+        projected.reserve(next_sampled_scene_points.size());
+        projectPoints(next_sampled_scene_points, rvec, t, K, noArray(),
+                      projected);
+
+        for (unsigned int j = 0; j < next_sampled_query_points.size(); ++j) {
+          double error = cv::norm(projected[j] - next_sampled_query_points[j]);
+          if (error < threshold) {
+            inliers.push_back(orig_idx[j]);
+          }
+        }
+        std::get<0>(hypotheses[i]) = rvec;
+        std::get<1>(hypotheses[i]) = t;
+        std::get<2>(hypotheses[i]) = inliers;
+      }
+    }
+
+    // retain best half
+    std::sort(hypotheses.begin(), hypotheses.end(),
+              [](const tuple<Mat, Mat, Mat>& first,
+                 const tuple<Mat, Mat, Mat>& second) {
+                return std::get<2>(first).rows > std::get<2>(second).rows;
+              });
+//    cout << "inlier counts: ";
+//    for (auto& element : hypotheses) {
+//      cout << std::get<2>(element).rows << ",";
+//    }
+//    cout << endl;
+    int next_num_hypotheses = hypotheses.size() / 2;
+    hypotheses.resize(next_num_hypotheses);
+
+    // refine hypotheses
+    for (unsigned int i = 0; i < hypotheses.size(); ++i) {
+      // this is potentially sort of slow, since we have to rebuild the inlier
+      // sets for each hypotheses. It would be nice if we could slice the
+      // original set somehow.
+      Mat inliers = std::get<2>(hypotheses[i]);
+      vector<cv::Point3f> scene_inliers;
+      vector<cv::Point2f> query_inliers;
+      int num_inliers = inliers.rows;
+      scene_inliers.reserve(num_inliers);
+      query_inliers.reserve(num_inliers);
+      for (int j = 0; j < num_inliers; ++j) {
+        scene_inliers.push_back(scene_points[inliers.at<int>(j)]);
+        query_inliers.push_back(query_points[inliers.at<int>(j)]);
+      }
+      Mat rvec(3, 1, CV_32F);
+      Mat t(3, 1, CV_32F);
+      solvePnP(scene_inliers, query_inliers, K, rvec, t, false);
+      std::get<0>(hypotheses[i]) = rvec;
+      std::get<1>(hypotheses[i]) = t;
+    }
+  }
+
+  _rvec = std::get<0>(hypotheses[0]);
+  _t = std::get<1>(hypotheses[0]);
+  _inliers = std::get<2>(hypotheses[0]);
+
+  if (use_iterative_refinement) {
+    // TODO: do one final optimization using the full set
+    vector<cv::Point2f> projected;
+    projectPoints(scene_points, _rvec, _t, K, noArray(), projected);
+
+    _inliers = Mat();
+    vector<cv::Point3f> scene_inliers;
+    vector<cv::Point2f> query_inliers;
+    for (unsigned int j = 0; j < query_points.size(); ++j) {
+      double error = cv::norm(projected[j] - query_points[j]);
+      if (error < threshold) {
+        _inliers.push_back(static_cast<int>(j));
+        scene_inliers.push_back(scene_points[j]);
+        query_inliers.push_back(query_points[j]);
+      }
+    }
+    cout << "final num inliers: " << scene_inliers.size() << endl;
+    solvePnP(scene_inliers, query_inliers, K, _rvec, _t, true);
+  }
+}
 class MatchingMethod {
  public:
   virtual ~MatchingMethod() = default;
@@ -99,6 +280,12 @@ class MatchingMethod {
       R.convertTo(R, rt);
       t.convertTo(t, tt);
     }
+
+    float inlier_fraction = static_cast<float>(countNonZero(inlier_mask)) / (inlier_mask.rows * inlier_mask.cols);
+    inlierFractionSum += inlier_fraction;
+    inlierFractionCount++;
+    cout << "latest inlier fraction: " << inlier_fraction << endl;
+    cout << "average inlier fraction: " << (inlierFractionSum / inlierFractionCount) << endl;
 
     static int num_displayed = 0;
     if (display_stereo_correspondences && num_displayed < 20 &&
@@ -417,6 +604,10 @@ class MatchingMethod {
   unsigned int high_inlier_queries = 0;
   unsigned int queries_without_gt = 0;
 
+  float inlierFractionSum = 0;
+  int inlierFractionCount = 0;
+
+
  protected:
   virtual void internalDoMatching(const Result& top_result,
                                   const vector<Point2f>& query_pts,
@@ -518,9 +709,13 @@ class Match_2d_3d_pnp : public MatchingMethod {
     Mat rvec, inliers;
 
 //    cout << "\tstarting ransac..." << endl;
-    solvePnPRansac(scene_coord_vec, query_pts, K, noArray(), rvec, t, false,
-                   ransac_num_iters, ransac_threshold, ransac_confidence, inliers);
-//    cout << "\transac complete!" << endl;
+    sdl::solvePnPRansac(scene_coord_vec, query_pts, K, rvec, t,
+                        ransac_num_iters, ransac_threshold, ransac_confidence,
+                        inliers, true);
+//    sdl::solvePreemptivePnPRansac(scene_coord_vec, query_pts, K, rvec, t,
+//                                  ransac_num_iters, ransac_batch_size,
+//                                  ransac_threshold, inliers, true);
+    //    cout << "\transac complete!" << endl;
     Rodrigues(rvec, R);
 
     R.convertTo(R, CV_32F);
@@ -809,22 +1004,22 @@ int main(int argc, char** argv) {
       if (!sdl::use_second_best_for_debugging) {
         // rerank by num inliers after geometric verification
         for (unsigned int result_idx = 0; result_idx < results.size(); ++result_idx) {
-          vector<KeyPoint> result_keypoints;
+          vector<KeyPoint> db_keypoints;
           Mat db_descriptors;
-          results[result_idx].frame.loadDescriptors(result_keypoints,
+          results[result_idx].frame.loadDescriptors(db_keypoints,
                                                     db_descriptors);
 
           // check ratio test
           map<int, list<DMatch>> best_match_per_trainidx(sdl::doRatioTest(
-              q_descriptors, db_descriptors, matcher, sdl::ratio_threshold,
-              sdl::use_caffe_descriptor));
+              q_descriptors, db_descriptors, query_keypoints, db_keypoints,
+              matcher, sdl::ratio_threshold, sdl::use_caffe_descriptor));
           vector<Point2f> p1, p2;
           p1.reserve(best_match_per_trainidx.size());
           p2.reserve(best_match_per_trainidx.size());
           for (auto& element : best_match_per_trainidx) {
             for (auto& match : element.second) {
               p1.push_back(query_keypoints[match.queryIdx].pt);
-              p2.push_back(result_keypoints[match.trainIdx].pt);
+              p2.push_back(db_keypoints[match.trainIdx].pt);
             }
           }
 
@@ -860,12 +1055,19 @@ int main(int argc, char** argv) {
 
             Mat rvec, t, inliers;
 
-//            cout << "\tstarting ransac for geom verif..." << endl;
-            solvePnPRansac(scene_coord_vec, p1, K, noArray(), rvec, t, false,
-                           sdl::ransac_num_iters, sdl::ransac_threshold,
-                           sdl::ransac_confidence, inliers, SOLVEPNP_EPNP);
-//            cout << "\transac complete!" << endl;
-            num_inliers[result_idx] = inliers.rows*inliers.cols;
+            //            cout << "\tstarting ransac for geom verif..." << endl;
+
+                        sdl::solvePnPRansac(scene_coord_vec, p1, K, rvec, t,
+                                            sdl::ransac_num_iters,
+                                            sdl::ransac_threshold,
+                                            sdl::ransac_confidence, inliers,
+                                            false);
+//            sdl::solvePreemptivePnPRansac(
+//                scene_coord_vec, p1, K, rvec, t, sdl::ransac_num_iters,
+//                sdl::ransac_batch_size, sdl::ransac_threshold, inliers, false);
+
+            //            cout << "\transac complete!" << endl;
+            num_inliers[result_idx] = inliers.rows * inliers.cols;
           }
         }
 
@@ -879,16 +1081,16 @@ int main(int argc, char** argv) {
       vector<Point2f> query_pts;
       vector<Point2f> database_pts;
 
-      vector<KeyPoint> result_keypoints;
+      vector<KeyPoint> db_keypoints;
       Mat db_descriptors;
-      top_result.frame.loadDescriptors(result_keypoints, db_descriptors);
+      top_result.frame.loadDescriptors(db_keypoints, db_descriptors);
 
       // ignore the matches used during inverted index voting. just compute our
       // own.
       // check ratio test
-      map<int, list<DMatch>> best_match_per_trainidx(
-          sdl::doRatioTest(q_descriptors, db_descriptors, matcher,
-                           sdl::ratio_threshold, sdl::use_caffe_descriptor));
+      map<int, list<DMatch>> best_match_per_trainidx(sdl::doRatioTest(
+          q_descriptors, db_descriptors, query_keypoints, db_keypoints, matcher,
+          sdl::ratio_threshold, sdl::use_caffe_descriptor));
       vector<DMatch> matches;
       matches.reserve(best_match_per_trainidx.size());
       for (auto& element : best_match_per_trainidx) {
@@ -949,18 +1151,18 @@ int main(int argc, char** argv) {
               text = ss.str();
 
               // also plot locations of putative matches
-              vector<KeyPoint> result_keypoints;
+              vector<KeyPoint> db_keypoints;
               Mat db_descriptors;
-              results[index].frame.loadDescriptors(result_keypoints,
+              results[index].frame.loadDescriptors(db_keypoints,
                                                    db_descriptors);
               // check ratio test
               map<int, list<DMatch>> best_match_per_trainidx(sdl::doRatioTest(
-                  q_descriptors, db_descriptors, matcher, sdl::ratio_threshold,
-                  sdl::use_caffe_descriptor));
+                  q_descriptors, db_descriptors, query_keypoints, db_keypoints,
+                  matcher, sdl::ratio_threshold, sdl::use_caffe_descriptor));
               for (auto& element : best_match_per_trainidx) {
                 for (auto& match : element.second) {
                   // draw larger than 1 pixel, so it shows up after resizing
-                  circle(image, result_keypoints[match.trainIdx].pt, 3,
+                  circle(image, db_keypoints[match.trainIdx].pt, 3,
                          Scalar(0, 0, 255), -1);
                 }
               }
@@ -1115,7 +1317,7 @@ int main(int argc, char** argv) {
 
 
         query_pts.push_back(query_keypoints[correspondence.queryIdx].pt);
-        database_pts.push_back(result_keypoints[correspondence.trainIdx].pt);
+        database_pts.push_back(db_keypoints[correspondence.trainIdx].pt);
       }
 //      cout << endl;
 

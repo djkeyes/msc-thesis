@@ -1370,6 +1370,8 @@ const Mat Query::computeDescriptors() {
 const vector<KeyPoint>& Query::getKeypoints() const { return keypoints; }
 
 map<int, list<DMatch>> doRatioTest(Mat query_descriptors, Mat db_descriptors,
+                                   const vector<KeyPoint>& query_keypoints,
+                                   const vector<KeyPoint>& db_keypoints,
                                    Ptr<DescriptorMatcher> matcher,
                                    double ratio_threshold,
                                    bool use_distance_threshold) {
@@ -1378,15 +1380,31 @@ map<int, list<DMatch>> doRatioTest(Mat query_descriptors, Mat db_descriptors,
   vector<vector<DMatch>> first_two_nns;
 
   if (ratio_threshold > 1.0) {
+    //    // just return a bunch of stuff
+    //    // for convenience, interpret the threshold as the num nearest
+    //    neighbors
+    //    matcher->knnMatch(query_descriptors, db_descriptors, first_two_nns,
+    //                      static_cast<int>(ratio_threshold));
+    //    for (vector<DMatch>& nn_matches : first_two_nns) {
+    //      for (auto& match : nn_matches) {
+    //        best_match_per_trainidx[match.trainIdx].push_back(match);
+    //      }
+    //    }
+
     // just return a bunch of stuff
-    // for convenience, interpret the threshold as the num nearest neighbors
-    matcher->knnMatch(query_descriptors, db_descriptors, first_two_nns,
-                      static_cast<int>(ratio_threshold));
-    for (vector<DMatch>& nn_matches : first_two_nns) {
+    // for convenience, interpret the threshold as a threshold distance
+
+    vector<vector<DMatch>> nns_in_radius;
+    matcher->radiusMatch(query_descriptors, db_descriptors, nns_in_radius,
+                         ratio_threshold);
+    int num_matches = 0;
+    for (vector<DMatch>& nn_matches : nns_in_radius) {
       for (auto& match : nn_matches) {
+        ++num_matches;
         best_match_per_trainidx[match.trainIdx].push_back(match);
       }
     }
+    cout << "found " << num_matches << " within radius " << ratio_threshold << endl;
   } else {
     matcher->knnMatch(query_descriptors, db_descriptors, first_two_nns, 2);
 
@@ -1400,22 +1418,23 @@ map<int, list<DMatch>> doRatioTest(Mat query_descriptors, Mat db_descriptors,
         // would require more bookkeeping
         if (iter == best_match_per_trainidx.end() ||
             iter->second.front().distance > nn_matches[0].distance) {
-          // for the caffe descriptor, the margin for the hinge loss is set to
+          // for the caffe descriptor, the margin for the hinge loss set to
           // 0.5. This makes a natural metric for detecting outliers.
-          //        if (!use_distance_threshold || nn_matches[0].distance < 128.0)
-          //        {
-          best_match_per_trainidx[nn_matches[0].trainIdx].clear();
-          best_match_per_trainidx[nn_matches[0].trainIdx].push_back(
-              nn_matches[0]);
-          //        }
+          if (!use_distance_threshold || nn_matches[0].distance < 12.0) {
+            best_match_per_trainidx[nn_matches[0].trainIdx].clear();
+            best_match_per_trainidx[nn_matches[0].trainIdx].push_back(
+                nn_matches[0]);
+          }
         }
       }
     }
 
     // optional: also check the other direction
     if (false) {
-      // this doesn't seem to work. not sure if there's a bug, or if the
-      // descriptors are just not very good.
+      // for dense descriptors, it's likely that if a point A in image 1 has
+      // nearest neighbor B in image 2, then the nearest neighbor of point B
+      // won't be A--but it could be a point that's relatively close to A, ergo
+      // it shoould be kept.
       matcher->knnMatch(db_descriptors, query_descriptors, first_two_nns, 1);
       for (vector<DMatch>& nn_matches : first_two_nns) {
         if (nn_matches.size() < 2) {
@@ -1434,17 +1453,37 @@ map<int, list<DMatch>> doRatioTest(Mat query_descriptors, Mat db_descriptors,
           // ratio test doesn't pass in the opposite direction
           need_to_remove = true;
         } else {
-          if (best_match_per_trainidx.find(trainIdx1) !=
-                  best_match_per_trainidx.end() &&
-              best_match_per_trainidx[trainIdx1].front().queryIdx != testIdx1) {
-            // a different point is the nearest neighbor
-            need_to_remove = true;
-
-            cout << "removing (" << trainIdx1 << "," << testIdx1 << ") <==> ("
-                 << trainIdx1 << ","
-                 << best_match_per_trainidx[trainIdx1].front().queryIdx
-                 << ") because ids don't match" << endl;
-          }
+          // This doesn't seem to work--there are weird banding effects where
+          // most descriptors in a band in an image are missing
+          // Maybe that's due to reprojecting other keyframes? not sure.
+//          if (best_match_per_trainidx.find(trainIdx1) !=
+//                  best_match_per_trainidx.end() &&
+//              best_match_per_trainidx[trainIdx1].front().queryIdx != testIdx1) {
+//            // for dense descriptor: if the nearest neighbor isn't exactly the
+//            // same, but it's in the same general area on the image plane, we're
+//            // okay
+//
+//            int alternativeTestIdx =
+//                best_match_per_trainidx[trainIdx1].front().queryIdx;
+//            float dist =
+//                cv::norm(query_keypoints[testIdx1].pt -
+//                              query_keypoints[alternativeTestIdx].pt);
+//            // this threshold should be a function of the size of the window
+//            // used to compute the descriptor (scale for SIFT and receptive
+//            // field for learned), but just guesstimate for now
+//            if (dist > 30) {
+//              cout << "orig: " << query_keypoints[testIdx1].pt
+//                   << ", alt: " << query_keypoints[alternativeTestIdx].pt
+//                   << ", norm: " << dist << endl;
+//              // a different point is the nearest neighbor
+//              need_to_remove = true;
+//
+//              cout << "removing (" << trainIdx1 << "," << testIdx1 << ") <==> ("
+//                   << trainIdx1 << ","
+//                   << best_match_per_trainidx[trainIdx1].front().queryIdx
+//                   << ") because ids don't match" << endl;
+//            }
+//          }
         }
 
         if (need_to_remove) {

@@ -7,6 +7,7 @@
 
 #include <Eigen/Core>
 #include <functional>
+#include <list>
 #include <map>
 #include <memory>
 #include <string>
@@ -212,6 +213,8 @@ class Database {
 
 std::map<int, std::list<cv::DMatch>> doRatioTest(
     cv::Mat query_descriptors, cv::Mat db_descriptors,
+    const std::vector<cv::KeyPoint>& query_keypoints,
+    const std::vector<cv::KeyPoint>& db_keypoints,
     cv::Ptr<cv::DescriptorMatcher> matcher, double ratio_threshold,
     bool use_distance_threshold);
 }  // namespace sdl
